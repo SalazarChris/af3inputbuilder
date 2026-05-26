@@ -545,21 +545,41 @@ def resolve_baseline(
                 log.info("Auto-detected baseline (keyword): %s%s%s", B, name, R)
                 return name
 
-    # Fewest non-protein entities, no PTMs
-    no_ptm = {n: c for n, c in conditions.items() if not c.ptm_labels}
+    # Fewest non-protein entities, no PTMs, no nucleic acid, no real ligand
+    no_ptm = {
+        n: c for n, c in conditions.items()
+        if not c.ptm_labels
+        and c.n_nucleic_residues == 0
+        and not c.has_real_ligand
+    }
     if no_ptm:
         best = min(no_ptm, key=lambda n: no_ptm[n].ion_count)
         log.info(
-            "Auto-detected baseline (fewest solvent/ions, no PTM): %s%s%s  "
+            "Auto-detected baseline (fewest solvent/ions, no PTM, no DNA): %s%s%s  "
             "(ion_count=%d)",
             B, best, R, conditions[best].ion_count,
         )
         return best
 
-    # Fewest non-protein entities regardless of PTM
+    # Fewest non-protein entities, no nucleic acid (PTMs allowed)
+    no_dna = {
+        n: c for n, c in conditions.items()
+        if c.n_nucleic_residues == 0
+        and not c.has_real_ligand
+    }
+    if no_dna:
+        best = min(no_dna, key=lambda n: no_dna[n].ion_count)
+        log.info(
+            "Auto-detected baseline (fewest solvent/ions, no DNA): %s%s%s  "
+            "(ion_count=%d)",
+            B, best, R, conditions[best].ion_count,
+        )
+        return best
+
+    # Last resort: fewest non-protein entities regardless of composition
     best = min(conditions, key=lambda n: conditions[n].ion_count)
     log.info(
-        "Auto-detected baseline (fewest solvent/ions): %s%s%s  (ion_count=%d)",
+        "Auto-detected baseline (fewest non-protein entities): %s%s%s  (ion_count=%d)",
         B, best, R, conditions[best].ion_count,
     )
     return best

@@ -41,57 +41,151 @@ _REQUIRED_PACKAGES = [
     ("tmtools",    "tmtools"),
 ]
 
-_OPTIONAL_PACKAGES = [
-    ("pymol2",     "pymol-open-source"),  # conda only
-]
+# PyMOL is optional (visualization only) and conda-only.
+# Import name is "pymol" (not "pymol2") in recent open-source builds.
+_PYMOL_IMPORT_NAMES = ("pymol", "pymol2")
+_PYMOL_CONDA_PKG    = "pymol-open-source"
+_PYMOL_CONDA_CHAN   = "conda-forge"
+
+
+def _in_conda_env() -> bool:
+    """True when the current Python is running inside a conda environment."""
+    return (
+        os.environ.get("CONDA_DEFAULT_ENV") is not None
+        or os.environ.get("CONDA_PREFIX") is not None
+        or "conda" in sys.version.lower()
+        or "anaconda" in sys.executable.lower()
+        or "miniconda" in sys.executable.lower()
+    )
+
+
+def _conda_exe() -> str:
+    """Return the conda executable path, or empty string if not found."""
+    for candidate in ("conda", os.path.join(os.environ.get("CONDA_EXE", ""), "")):
+        try:
+            result = subprocess.run(
+                [candidate, "--version"],
+                capture_output=True, timeout=5,
+            )
+            if result.returncode == 0:
+                return candidate
+        except Exception:
+            pass
+    return ""
+
+
+def _pymol_available() -> bool:
+    import importlib as _il
+    for name in _PYMOL_IMPORT_NAMES:
+        try:
+            _il.import_module(name)
+            return True
+        except ImportError:
+            pass
+    return False
 
 
 def _check_and_install_deps():
-    """Check required packages on startup; offer to auto-install if missing."""
+    """
+    Check required packages on startup; offer to auto-install if missing.
+
+    Required packages (numpy, pandas, scipy, matplotlib, biopython, tmtools)
+    are installed via pip.
+
+    PyMOL is optional and conda-only.  If missing, the user is shown the
+    exact conda command to run.  If conda is available and the user agrees,
+    it is installed automatically.
+    """
     import importlib as _il
-    missing = []
+
+    # ------------------------------------------------------------------ #
+    # 1. Required packages via pip                                         #
+    # ------------------------------------------------------------------ #
+    missing_pip = []
     for import_name, pip_name in _REQUIRED_PACKAGES:
         try:
             _il.import_module(import_name)
         except ImportError:
-            missing.append((import_name, pip_name))
+            missing_pip.append((import_name, pip_name))
 
-    if not missing:
-        return True
+    if missing_pip:
+        print("\n" + "=" * 60)
+        print("  AF3 Toolkit -- Missing Dependencies")
+        print("=" * 60)
+        for name, pkg in missing_pip:
+            print(f"  \033[91m✖\033[0m  {name}  ({pkg})")
+        print(f"\n  {len(missing_pip)} package(s) need to be installed.\n")
 
-    print("\n" + "=" * 60)
-    print("  AF3 Toolkit -- Missing Dependencies")
-    print("=" * 60)
-    for name, pkg in missing:
-        print(f"  \033[91m✖\033[0m  {name} ({pkg})")
-    print(f"\n  {len(missing)} package(s) need to be installed.\n")
-
-    try:
-        answer = input("  Install now? (Y/n): ").strip().lower()
-    except (KeyboardInterrupt, EOFError):
-        return False
-
-    if answer not in ("", "y", "yes"):
-        print("\n  Skipped. Some tools may not work.\n")
-        return False
-
-    pip_packages = [pkg for _, pkg in missing]
-    cmd = [sys.executable, "-m", "pip", "install", "--quiet"] + pip_packages
-    print(f"\n  Installing: {', '.join(pip_packages)}...")
-    result = subprocess.run(cmd)
-    if result.returncode == 0:
-        print("  \033[92m✔  Installed.\033[0m\n")
-    else:
-        print(f"  \033[91m✖  pip install failed.\033[0m")
-        print(f"  Try manually: pip install {' '.join(pip_packages)}\n")
-
-    # Re-import
-    for import_name, _ in missing:
         try:
-            _il.import_module(import_name)
-        except ImportError:
-            pass
-    return True
+            answer = input("  Install via pip now? (Y/n): ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            answer = "n"
+
+        if answer in ("", "y", "yes"):
+            pip_pkgs = [pkg for _, pkg in missing_pip]
+            cmd = [sys.executable, "-m", "pip", "install", "--quiet"] + pip_pkgs
+            print(f"\n  Installing: {', '.join(pip_pkgs)}...")
+            result = subprocess.run(cmd)
+            if result.returncode == 0:
+                print("  \033[92m✔  Installed.\033[0m\n")
+            else:
+                print("  \033[91m✖  pip install failed.\033[0m")
+                print(f"  Try manually:  pip install {' '.join(pip_pkgs)}\n")
+            for import_name, _ in missing_pip:
+                try:
+                    _il.import_module(import_name)
+                except ImportError:
+                    pass
+        else:
+            print("\n  Skipped. Some tools may not work.\n")
+
+    # ------------------------------------------------------------------ #
+    # 2. PyMOL (optional, conda-only)                                     #
+    # ------------------------------------------------------------------ #
+    if not _pymol_available():
+        print("\n" + "-" * 60)
+        print("  PyMOL not found  (optional — needed for .pse session files)")
+        print("-" * 60)
+
+        conda = _conda_exe()
+        in_conda = _in_conda_env()
+
+        if conda and in_conda:
+            print(f"\n  conda detected.  Install command:")
+            print(f"  \033[96m  conda install -c {_PYMOL_CONDA_CHAN} {_PYMOL_CONDA_PKG}\033[0m\n")
+            try:
+                answer = input("  Install PyMOL via conda now? (y/N): ").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                answer = "n"
+
+            if answer in ("y", "yes"):
+                cmd = [conda, "install", "-y", "-c", _PYMOL_CONDA_CHAN, _PYMOL_CONDA_PKG]
+                print("\n  Installing PyMOL...")
+                result = subprocess.run(cmd)
+                if result.returncode == 0:
+                    print("  \033[92m✔  PyMOL installed.\033[0m\n")
+                else:
+                    print("  \033[91m✖  conda install failed.\033[0m")
+                    print(f"  Try manually:  conda install -c {_PYMOL_CONDA_CHAN} {_PYMOL_CONDA_PKG}\n")
+            else:
+                print("  Skipped.  PyMOL .pse generation will be unavailable.\n")
+
+        elif in_conda and not conda:
+            # Inside conda but conda exe not on PATH
+            print(f"\n  You appear to be in a conda environment.")
+            print(f"  Install PyMOL with:")
+            print(f"  \033[96m  conda install -c {_PYMOL_CONDA_CHAN} {_PYMOL_CONDA_PKG}\033[0m\n")
+            input("  Press Enter to continue without PyMOL...")
+
+        else:
+            # Not in conda at all
+            print("\n  PyMOL requires conda.  To install:")
+            print("  1. Install Miniconda:  https://docs.conda.io/en/latest/miniconda.html")
+            print(f"  2. Run:  conda install -c {_PYMOL_CONDA_CHAN} {_PYMOL_CONDA_PKG}")
+            print("\n  Continuing without PyMOL.  .pml scripts will still be generated.\n")
+            input("  Press Enter to continue...")
 
 
 _check_and_install_deps()
@@ -133,8 +227,8 @@ def print_menu():
     print(f"  {BOLD}{CYAN}1{RESET})  {BOLD}Job Builder{RESET}")
     print(f"      {DIM}Guided multi-entity setup for AF3 input JSONs.{RESET}")
     print()
-    print(f"  {BOLD}{CYAN}2{RESET})  {BOLD}Analysis Pipeline{RESET}")
-    print(f"      {DIM}Structural comparison across AF3 conditions (baseline or all-vs-all).{RESET}")
+    print(f"  {BOLD}{CYAN}2{RESET})  {BOLD}MSA Extractor{RESET}")
+    print(f"      {DIM}Extract MSAs from AF3 result JSONs for re-runs.{RESET}")
     print()
     print(f"  {BOLD}{CYAN}3{RESET})  {BOLD}Ion / Ligand Sweep{RESET}")
     print(f"      {DIM}Generate concentration-sweep or library-screen job files.{RESET}")
@@ -142,8 +236,8 @@ def print_menu():
     print(f"  {BOLD}{CYAN}4{RESET})  {BOLD}JSON Validator{RESET}")
     print(f"      {DIM}Check job files for schema errors and compatibility issues.{RESET}")
     print()
-    print(f"  {BOLD}{CYAN}5{RESET})  {BOLD}MSA Extractor{RESET}")
-    print(f"      {DIM}Extract MSAs from AF3 result JSONs for re-runs.{RESET}")
+    print(f"  {BOLD}{CYAN}5{RESET})  {BOLD}Analysis Pipeline{RESET}")
+    print(f"      {DIM}Structural comparison across AF3 conditions.{RESET}")
     print()
     print(f"  {BOLD}{CYAN}0{RESET})  {BOLD}Exit{RESET}")
     print()
@@ -334,7 +428,7 @@ def main():
             _launch("af3_wizard", "run_wizard")
             _pause()
         elif choice == "2":
-            run_analysis()
+            _launch("msa_wizard", "main")
             _pause()
         elif choice == "3":
             _launch("add_ions_wizard", "run_wizard")
@@ -343,7 +437,7 @@ def main():
             _launch("af3_json_validator", "main")
             _pause()
         elif choice == "5":
-            _launch("msa_wizard", "main")
+            run_analysis()
             _pause()
         elif choice:
             _err("Invalid option.")

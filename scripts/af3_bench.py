@@ -833,7 +833,8 @@ def parse_experiment_structure(
     conditions: Dict[str, ConditionModel],
 ) -> ExperimentStructure:
     """
-    Infer the factorial structure (ion concentration × PTM) from loaded conditions.
+    Infer the factorial structure (ion concentration × modification group)
+    from loaded conditions.
 
     Ion tier is derived from the condition's ion_count relative to the minimum
     observed across all conditions:
@@ -843,7 +844,14 @@ def parse_experiment_structure(
       - 1000× min  → "1000x"
       - other      → "{N}x" (actual count)
 
-    PTM group is the joined PTM label string, or "none".
+    PTM group encodes all non-ion modifications present:
+      - PTMs (SEP102, TPO235, …)
+      - DNA presence ("DNA")
+      - Combinations ("DNA+SEP102")
+      - "none" when protein-only with no modifications
+
+    This means DNA-containing conditions appear as their own rows in the
+    structured panel grid, alongside PTM and unmodified rows.
     """
     ion_tier: Dict[str, str] = {}
     ptm_group: Dict[str, str] = {}
@@ -873,17 +881,24 @@ def parse_experiment_structure(
                 tier = f"{cnt}x"
         ion_tier[name] = tier
 
-        # PTM group
-        ptm_group[name] = ",".join(cond.ptm_labels) if cond.ptm_labels else "none"
+        # Build modification group label:
+        # combines DNA presence + PTM labels so each unique combination
+        # becomes a distinct row in the panel grid.
+        parts = []
+        if cond.n_nucleic_residues > 0:
+            parts.append("DNA")
+        parts.extend(cond.ptm_labels)
+        ptm_group[name] = "+".join(parts) if parts else "none"
 
-        # DNA / real ligand
+        # DNA / real ligand flags
         has_dna[name] = cond.n_nucleic_residues > 0
         has_real_ligand[name] = cond.has_real_ligand
 
-    # Panel conditions: no real ligand, no DNA
+    # Panel conditions: everything except real ligands
+    # (DNA is now included — it becomes its own row via ptm_group)
     panel_conditions = {
         n for n in conditions
-        if not has_dna[n] and not has_real_ligand[n]
+        if not has_real_ligand[n]
     }
 
     # Ordered tiers (0x first, then numeric ascending)
@@ -894,10 +909,19 @@ def parse_experiment_structure(
 
     tier_order = sorted({ion_tier[n] for n in panel_conditions}, key=_tier_key)
 
-    # PTM order: "none" first, then alphabetical
+    # Group order: "none" first, then DNA groups, then PTM groups, alphabetical within
+    def _group_key(g: str) -> tuple:
+        if g == "none":
+            return (0, "")
+        if g.startswith("DNA") and "+" not in g:
+            return (1, g)   # pure DNA rows
+        if g.startswith("DNA"):
+            return (2, g)   # DNA + PTM combinations
+        return (3, g)       # PTM-only rows
+
     ptm_order = sorted(
         {ptm_group[n] for n in panel_conditions},
-        key=lambda p: ("" if p == "none" else p),
+        key=_group_key,
     )
 
     return ExperimentStructure(

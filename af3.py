@@ -41,61 +41,9 @@ _REQUIRED_PACKAGES = [
     ("tmtools",    "tmtools"),
 ]
 
-# PyMOL is optional (visualization only) and conda-only.
-# Import name is "pymol" (not "pymol2") in recent open-source builds.
-_PYMOL_IMPORT_NAMES = ("pymol", "pymol2")
-_PYMOL_CONDA_PKG    = "pymol-open-source"
-_PYMOL_CONDA_CHAN   = "conda-forge"
-
-
-def _in_conda_env() -> bool:
-    """True when the current Python is running inside a conda environment."""
-    return (
-        os.environ.get("CONDA_DEFAULT_ENV") is not None
-        or os.environ.get("CONDA_PREFIX") is not None
-        or "conda" in sys.version.lower()
-        or "anaconda" in sys.executable.lower()
-        or "miniconda" in sys.executable.lower()
-    )
-
-
-def _conda_exe() -> str:
-    """Return the conda executable path, or empty string if not found."""
-    for candidate in ("conda", os.path.join(os.environ.get("CONDA_EXE", ""), "")):
-        try:
-            result = subprocess.run(
-                [candidate, "--version"],
-                capture_output=True, timeout=5,
-            )
-            if result.returncode == 0:
-                return candidate
-        except Exception:
-            pass
-    return ""
-
-
-def _pymol_available() -> bool:
-    import importlib as _il
-    for name in _PYMOL_IMPORT_NAMES:
-        try:
-            _il.import_module(name)
-            return True
-        except ImportError:
-            pass
-    return False
-
 
 def _check_and_install_deps():
-    """
-    Check required packages on startup; offer to auto-install if missing.
-
-    Required packages (numpy, pandas, scipy, matplotlib, biopython, tmtools)
-    are installed via pip.
-
-    PyMOL is optional and conda-only.  If missing, the user is shown the
-    exact conda command to run.  If conda is available and the user agrees,
-    it is installed automatically.
-    """
+    """Check required packages on startup; offer to auto-install via pip if missing."""
     import importlib as _il
 
     # ------------------------------------------------------------------ #
@@ -139,53 +87,6 @@ def _check_and_install_deps():
                     pass
         else:
             print("\n  Skipped. Some tools may not work.\n")
-
-    # ------------------------------------------------------------------ #
-    # 2. PyMOL (optional, conda-only)                                     #
-    # ------------------------------------------------------------------ #
-    if not _pymol_available():
-        print("\n" + "-" * 60)
-        print("  PyMOL not found  (optional — needed for .pse session files)")
-        print("-" * 60)
-
-        conda = _conda_exe()
-        in_conda = _in_conda_env()
-
-        if conda and in_conda:
-            print(f"\n  conda detected.  Install command:")
-            print(f"  \033[96m  conda install -c {_PYMOL_CONDA_CHAN} {_PYMOL_CONDA_PKG}\033[0m\n")
-            try:
-                answer = input("  Install PyMOL via conda now? (y/N): ").strip().lower()
-            except (KeyboardInterrupt, EOFError):
-                print()
-                answer = "n"
-
-            if answer in ("y", "yes"):
-                cmd = [conda, "install", "-y", "-c", _PYMOL_CONDA_CHAN, _PYMOL_CONDA_PKG]
-                print("\n  Installing PyMOL...")
-                result = subprocess.run(cmd)
-                if result.returncode == 0:
-                    print("  \033[92m✔  PyMOL installed.\033[0m\n")
-                else:
-                    print("  \033[91m✖  conda install failed.\033[0m")
-                    print(f"  Try manually:  conda install -c {_PYMOL_CONDA_CHAN} {_PYMOL_CONDA_PKG}\n")
-            else:
-                print("  Skipped.  PyMOL .pse generation will be unavailable.\n")
-
-        elif in_conda and not conda:
-            # Inside conda but conda exe not on PATH
-            print(f"\n  You appear to be in a conda environment.")
-            print(f"  Install PyMOL with:")
-            print(f"  \033[96m  conda install -c {_PYMOL_CONDA_CHAN} {_PYMOL_CONDA_PKG}\033[0m\n")
-            input("  Press Enter to continue without PyMOL...")
-
-        else:
-            # Not in conda at all
-            print("\n  PyMOL requires conda.  To install:")
-            print("  1. Install Miniconda:  https://docs.conda.io/en/latest/miniconda.html")
-            print(f"  2. Run:  conda install -c {_PYMOL_CONDA_CHAN} {_PYMOL_CONDA_PKG}")
-            print("\n  Continuing without PyMOL.  .pml scripts will still be generated.\n")
-            input("  Press Enter to continue...")
 
 
 _check_and_install_deps()

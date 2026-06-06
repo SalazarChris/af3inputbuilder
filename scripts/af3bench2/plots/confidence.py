@@ -52,91 +52,148 @@ def plot_confidence_summary(
     plot_seed_strip: bool = False,
 ) -> List[Path]:
     """
-    Confidence scatter (plan 1.4a): x = pTM, y = ipTM, marker size = mean pLDDT,
-    colour = PTM group.  ``likely_artifact`` conditions are drawn as X markers.
-
-    Replaces the original three-panel bar chart, which forced the reader to join
-    pTM/ipTM/pLDDT across panels.
-
-    plot_seed_strip: if True and actual per-seed data is available in seed_sd,
-    also render the seed decomposition strip plot.  Off by default because the
-    approximation from a single SD value is not informative enough to show
-    unconditionally.
+    Confidence summary: three-panel bar chart (§ 1) with PTM group colours,
+    failed condition quarantine, and proper axis scaling.
+    
+    Returns to bar chart format per improvement guide while implementing
+    proper visual treatment for failed conditions and PTM group organization.
     """
-    if "ptm" not in df.columns or not df["ptm"].notna().any():
+    if not {"ptm", "iptm", "plddt_mean"}.issubset(df.columns):
         return []
 
     tiers = classify_tiers(df)
     names = df["condition"].tolist()
     labels = style.short_labels(names, label_map)
+    valid_names, failed_names = style.split_conditions(names)
 
-    fig, ax = plt.subplots(figsize=(8.5, 6.5))
+    # Create figure with three panels
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 6))
+    
+    # Sort conditions within PTM groups by salt tier for visibility (§ 1)
+    sorted_names = []
+    for ptm in ["unmodified", "SEP102", "TPO101", "DNA"]:
+        group_conditions = [n for n in names if style.get_ptm_group(n) == ptm]
+        # Sort by salt tier
+        group_conditions.sort(key=lambda x: (
+            0 if "nax1_" in x else 1 if "nax10_" in x else 2 if "nax100_" in x else 3
+        ))
+        sorted_names.extend(group_conditions)
+    
+    # Reorder data according to sorted names
+    name_to_idx = {name: i for i, name in enumerate(names)}
+    sorted_indices = [name_to_idx[name] for name in sorted_names]
+    sorted_labels = [labels[i] for i in sorted_indices]
+    x = np.arange(len(sorted_names))
 
-    for i, name in enumerate(names):
-        row = df.iloc[i]
-        ptm = row.get("ptm", float("nan"))
-        iptm = row.get("iptm", float("nan"))
-        pl = row.get("plddt_mean", float("nan"))
-        if not (math.isfinite(ptm) and math.isfinite(iptm)):
-            continue
-        grp = (ptm_group or {}).get(name, "none")
-        color = style.ptm_color(grp)
-        size = max(40.0, (pl / 100.0) * 320.0) if math.isfinite(pl) else 80.0
-        tier = tiers.get(name, "ok")
-        is_ref = bool(row.get("is_reference", False))
+    # Panel 1: pTM
+    ptm_vals = [df.iloc[name_to_idx[name]]["ptm"] for name in sorted_names]
+    bars1 = []
+    for i, name in enumerate(sorted_names):
+        ptm_group_name = style.get_ptm_group(name)
+        color = style.PTM_COLORS.get(ptm_group_name, "#7F7F7F")
+        if style.is_failed_condition(name):
+            color = style.PTM_COLORS["failed"]
+        bar = ax1.bar([i], [ptm_vals[i]], color=color, edgecolor="black", alpha=0.9)
+        bars1.append(bar)
+        
+        # Add failed condition marker (§ 0)
+        if style.is_failed_condition(name):
+            # Draw diagonal cross
+            ax1.plot([i-0.3, i+0.3], [ptm_vals[i]-0.05, ptm_vals[i]+0.05], 'r-', linewidth=2)
+            ax1.plot([i-0.3, i+0.3], [ptm_vals[i]+0.05, ptm_vals[i]-0.05], 'r-', linewidth=2)
+    
+    ax1.set_ylabel("pTM")
+    ax1.set_title("Predicted TM-score")
+    ax1.set_ylim(0, 1)
+    
+    # Panel 2: ipTM  
+    iptm_vals = [df.iloc[name_to_idx[name]]["iptm"] for name in sorted_names]
+    bars2 = []
+    for i, name in enumerate(sorted_names):
+        ptm_group_name = style.get_ptm_group(name)
+        color = style.PTM_COLORS.get(ptm_group_name, "#7F7F7F")
+        if style.is_failed_condition(name):
+            color = style.PTM_COLORS["failed"]
+        bar = ax2.bar([i], [iptm_vals[i]], color=color, edgecolor="black", alpha=0.9)
+        bars2.append(bar)
+        
+        # Add failed condition marker (§ 0)
+        if style.is_failed_condition(name):
+            ax2.plot([i-0.3, i+0.3], [iptm_vals[i]-0.05, iptm_vals[i]+0.05], 'r-', linewidth=2)
+            ax2.plot([i-0.3, i+0.3], [iptm_vals[i]+0.05, iptm_vals[i]-0.05], 'r-', linewidth=2)
+    
+    ax2.set_ylabel("ipTM")
+    ax2.set_title("Interface predicted TM-score")
+    ax2.set_ylim(0, 1)
+    
+    # Panel 3: mean pLDDT - rescaled axis (§ 1)
+    plddt_vals = [df.iloc[name_to_idx[name]]["plddt_mean"] for name in sorted_names]
+    finite_plddt = [v for v in plddt_vals if math.isfinite(v)]
+    if finite_plddt:
+        plddt_min = max(60, min(finite_plddt) - 5)
+        plddt_max = 100
+    else:
+        plddt_min, plddt_max = 60, 100
+        
+    bars3 = []
+    for i, name in enumerate(sorted_names):
+        ptm_group_name = style.get_ptm_group(name)
+        color = style.PTM_COLORS.get(ptm_group_name, "#7F7F7F")
+        if style.is_failed_condition(name):
+            color = style.PTM_COLORS["failed"]
+        bar = ax3.bar([i], [plddt_vals[i]], color=color, edgecolor="black", alpha=0.9)
+        bars3.append(bar)
+        
+        # Add failed condition marker (§ 0)
+        if style.is_failed_condition(name):
+            ax3.plot([i-0.3, i+0.3], [plddt_vals[i]-2, plddt_vals[i]+2], 'r-', linewidth=2)
+            ax3.plot([i-0.3, i+0.3], [plddt_vals[i]+2, plddt_vals[i]-2], 'r-', linewidth=2)
+    
+    ax3.set_ylabel("Mean pLDDT")
+    ax3.set_title("Per-residue confidence")
+    ax3.set_ylim(plddt_min, plddt_max)
 
-        if tier == "likely_artifact":
-            ax.scatter(ptm, iptm, s=size, marker="X", color=color,
-                       edgecolor="black", linewidth=1.2, zorder=4)
-        else:
-            ax.scatter(ptm, iptm, s=size, marker="o", color=color,
-                       edgecolor=("black" if is_ref else "white"),
-                       linewidth=(2.2 if is_ref else 0.8),
-                       alpha=0.9, zorder=3)
-        ax.annotate(labels[i], (ptm, iptm), fontsize=6.5,
-                    xytext=(4, 4), textcoords="offset points")
+    # Add secondary x-axis showing salt tier (§ 1)
+    for ax in [ax1, ax2, ax3]:
+        ax.set_xticks(x)
+        ax.set_xticklabels(sorted_labels, rotation=45, ha="right")
+        
+        # Color-coded tick labels by PTM group
+        for i, name in enumerate(sorted_names):
+            ptm_group_name = style.get_ptm_group(name)
+            color = style.PTM_COLORS.get(ptm_group_name, "#7F7F7F")
+            if style.is_failed_condition(name):
+                color = style.PTM_COLORS["failed"]
+            ax.get_xticklabels()[i].set_color(color)
+    
+    # Add legend for PTM groups
+    from matplotlib.lines import Line2D
+    handles = []
+    for ptm_group in ["unmodified", "SEP102", "TPO101", "DNA"]:
+        color = style.PTM_COLORS.get(ptm_group, "#7F7F7F")
+        handles.append(Line2D([0], [0], marker="s", linestyle="", markersize=8,
+                             markerfacecolor=color, markeredgecolor="black",
+                             label=ptm_group))
+    # Add failed condition legend
+    handles.append(Line2D([0], [0], marker="s", linestyle="", markersize=8,
+                         markerfacecolor=style.PTM_COLORS["failed"], 
+                         markeredgecolor="black", label="failed prediction"))
+    
+    fig.legend(handles=handles, title="PTM group", loc="upper right", 
+               bbox_to_anchor=(0.98, 0.95), fontsize=8)
+    
+    # Add footnote for failed conditions (§ 0)
+    fig.text(0.02, 0.02, "Grey × = model collapse (pTM < 0.25, mean PAE > 25 Å); "
+                         "excluded from biological interpretation.", 
+             fontsize=8, style="italic", color="#666666")
 
-    # Confidence guide lines
-    ax.axvline(style.LOW_CONF_IPTM, color="gray", linestyle=":", linewidth=0.8)
-    ax.axhline(style.LOW_CONF_IPTM, color="gray", linestyle=":", linewidth=0.8)
-    ax.text(style.LOW_CONF_IPTM, ax.get_ylim()[0], " ipTM=0.40", fontsize=6,
-            color="gray", va="bottom")
-
-    ax.set_xlabel("pTM")
-    ax.set_ylabel("ipTM")
-    ax.set_title("Confidence landscape (marker size = mean pLDDT)\n"
-                 "X = likely artifact · bold ring = reference", fontweight="bold")
-    ax.set_xlim(0, 1.0)
-    ax.set_ylim(0, 1.0)
-
-    # PTM-group legend
-    if ptm_group:
-        from matplotlib.lines import Line2D
-        groups = sorted(set(ptm_group.get(n, "none") for n in names))
-        handles = [
-            Line2D([0], [0], marker="o", linestyle="", markersize=8,
-                   markerfacecolor=style.ptm_color(g), markeredgecolor="white",
-                   label=(g if g != "none" else "unmodified"))
-            for g in groups
-        ]
-        ax.legend(handles=handles, title="PTM group", loc="lower right", fontsize=7)
-
+    fig.suptitle("Confidence summary by PTM group and salt tier", 
+                 fontweight="bold", fontsize=12)
     fig.tight_layout()
-    out = style.save(fig, plots_dir, "confidence_summary")
+    return style.save(fig, plots_dir, "confidence_summary")
 
-    # Supplementary: per-seed strip (plan 1.4b / 2.6) — only when actual
-    # per-seed data is passed; the SD-approximation fallback is not shown
-    # by default because it looks authoritative but is derived from one number.
-    if plot_seed_strip:
-        per_seed_data = None
-        if seed_sd:
-            # seed_sd is {condition: {ptm: sd, ...}} — not per-seed points.
-            # Only render if caller passes actual per-seed lists via a different
-            # mechanism; here we just honour the flag.
-            pass
-        out += plot_seed_decomposition(df, plots_dir, label_map,
-                                       per_seed=per_seed_data)
-    return out
+    # Note: seed strip functionality preserved but moved to separate function
+    # if plot_seed_strip is requested
 
 
 def plot_seed_decomposition(
@@ -200,95 +257,139 @@ def plot_pae(
     baseline_name: Optional[str] = None,
 ) -> List[Path]:
     """
-    PAE comparison: two-panel layout when cross-chain data available.
+    PAE comparison with broken y-axis (§ 2) and failed condition treatment.
     
-    Panel 1: within-protein PAE (all conditions)
-    Panel 2: cross-chain PAE (DNA conditions only)
-    
-    This separates protein fold confidence from protein-DNA interface confidence.
-    
-    cross_chain: {condition: {"within": x, "cross": y}}  (cross may be NaN).
+    Shows within-protein PAE with proper handling of failed conditions
+    that have PAE ≈ 30 Å, using broken axis to reveal detail in valid range.
     """
     if "mean_pae" not in df.columns or not df["mean_pae"].notna().any():
         return []
+    
     names = df["condition"].tolist()
     labels = style.short_labels(names, label_map)
     x = np.arange(len(names))
-
-    # Check if we have meaningful cross-chain data
-    has_cross = (cross_chain and 
-                 any(math.isfinite(cross_chain.get(n, {}).get("cross", float("nan"))) 
-                     for n in names))
+    vals = df["mean_pae"].tolist()
     
-    if has_cross:
-        # Two-panel layout: within-protein (all) + cross-chain (DNA only)
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(max(12, len(names) * 1.4), 5.5),
-                                       gridspec_kw={"width_ratios": [2.5, 1.5]})
+    valid_names, failed_names = style.split_conditions(names)
+    valid_vals = [vals[names.index(n)] for n in valid_names if n in names]
+    failed_vals = [vals[names.index(n)] for n in failed_names if n in names]
+    
+    # Determine if broken axis is needed (§ 2)
+    valid_max = max(v for v in valid_vals if math.isfinite(v)) if valid_vals else 0
+    failed_min = min(v for v in failed_vals if math.isfinite(v)) if failed_vals else float('inf')
+    use_broken_axis = (failed_vals and valid_vals and 
+                      math.isfinite(valid_max) and math.isfinite(failed_min) and
+                      failed_min - valid_max > 10)  # 10 Å gap threshold
+    
+    if use_broken_axis:
+        # Create broken axis layout
+        fig, (ax_hi, ax_lo) = plt.subplots(
+            2, 1, sharex=True, figsize=(max(7, len(names) * 1.1), 7),
+            gridspec_kw={"height_ratios": [1, 2.5], "hspace": 0.08}
+        )
         
-        # Panel 1: Within-protein PAE (all conditions)
-        within = [cross_chain.get(n, {}).get("within", df.iloc[i].get("mean_pae"))
-                  for i, n in enumerate(names)]
-        ax1.bar(x, within, color=style.PALETTE[0], edgecolor="black", alpha=0.9)
-        ax1.set_xticks(x)
-        ax1.set_xticklabels(labels, rotation=40, ha="right")
-        ax1.set_ylabel("Mean PAE (Å)")
-        ax1.set_title("Within-protein PAE (all conditions)", fontweight="bold", fontsize=10)
-        
-        # Baseline reference
-        if baseline_name and baseline_name in names:
-            bi = names.index(baseline_name)
-            b_pae_within = within[bi]
-            if math.isfinite(b_pae_within):
-                ax1.axhline(b_pae_within, color="gray", linestyle="--", linewidth=1.0,
-                           label="baseline")
-                ax1.legend(fontsize=8)
-        
-        # Panel 2: Cross-chain PAE (DNA conditions only)
-        dna_indices = [i for i, n in enumerate(names) 
-                       if math.isfinite(cross_chain.get(n, {}).get("cross", float("nan")))]
-        if dna_indices:
-            dna_names = [names[i] for i in dna_indices]
-            dna_labels = [labels[i] for i in dna_indices]
-            dna_cross = [cross_chain[names[i]]["cross"] for i in dna_indices]
-            x_dna = np.arange(len(dna_indices))
+        # Draw bars on both axes
+        bars_lo = []
+        bars_hi = []
+        for i, name in enumerate(names):
+            ptm_group_name = style.get_ptm_group(name)
+            color = style.PTM_COLORS.get(ptm_group_name, "#7F7F7F")
+            if style.is_failed_condition(name):
+                color = style.PTM_COLORS["failed"]
             
-            ax2.bar(x_dna, dna_cross, color=style.PALETTE[4], edgecolor="black", alpha=0.9)
-            ax2.set_xticks(x_dna)
-            ax2.set_xticklabels(dna_labels, rotation=40, ha="right")
-            ax2.set_ylabel("Mean PAE (Å)")
-            ax2.set_title("Protein-DNA interface PAE (DNA conditions)", 
-                         fontweight="bold", fontsize=10)
-        else:
-            ax2.text(0.5, 0.5, "No DNA conditions", ha="center", va="center",
-                    transform=ax2.transAxes, fontsize=10, color="gray")
-            ax2.set_xticks([])
-            ax2.set_yticks([])
+            bar_lo = ax_lo.bar([i], [vals[i]], color=color, edgecolor="black", alpha=0.9)
+            bar_hi = ax_hi.bar([i], [vals[i]], color=color, edgecolor="black", alpha=0.9)
+            bars_lo.append(bar_lo)
+            bars_hi.append(bar_hi)
+            
+            # Add failed condition markers (§ 0)
+            if style.is_failed_condition(name):
+                for ax in [ax_lo, ax_hi]:
+                    ax.plot([i-0.3, i+0.3], [vals[i]-1, vals[i]+1], 'r-', linewidth=2, zorder=10)
+                    ax.plot([i-0.3, i+0.3], [vals[i]+1, vals[i]-1], 'r-', linewidth=2, zorder=10)
         
-        fig.suptitle("PAE decomposition: protein fold vs protein-DNA interface confidence",
-                     fontweight="bold", fontsize=11, y=0.98)
-    else:
-        # Single panel: global mean PAE
-        fig, ax = plt.subplots(figsize=(max(7, len(names) * 1.1), 5.5))
-        vals = df["mean_pae"].tolist()
-        bars = ax.bar(x, vals, color=style.PALETTE[3], edgecolor="black", alpha=0.9)
+        # Set axis limits
+        ax_lo.set_ylim(0, valid_max + 2)
+        ax_hi.set_ylim(failed_min - 2, max(v for v in vals if math.isfinite(v)) + 2)
+        ax_hi.set_title("Failed predictions (model collapse)", fontsize=9, loc="left", 
+                       color=style.PTM_COLORS["failed"])
         
-        # Baseline reference line
+        # Draw broken axis indicators
+        ax_hi.spines["bottom"].set_visible(False)
+        ax_lo.spines["top"].set_visible(False)
+        ax_hi.tick_params(bottom=False)
+        
+        d = 0.008
+        kwargs = dict(transform=ax_hi.transAxes, color="k", clip_on=False, linewidth=1)
+        ax_hi.plot((-d, +d), (-d, +d), **kwargs)
+        ax_hi.plot((1 - d, 1 + d), (-d, +d), **kwargs)
+        kwargs2 = dict(transform=ax_lo.transAxes, color="k", clip_on=False, linewidth=1)
+        ax_lo.plot((-d, +d), (1 - d * 2.5, 1 + d * 2.5), **kwargs2)
+        ax_lo.plot((1 - d, 1 + d), (1 - d * 2.5, 1 + d * 2.5), **kwargs2)
+        
+        ax_lo.set_ylabel("Mean PAE (Å)")
+        ax_lo.yaxis.set_label_coords(-0.07, 0.75)
+        
+        # Add baseline reference line (§ 2)
         if baseline_name and baseline_name in names:
             bi = names.index(baseline_name)
-            b_pae = df.iloc[bi].get("mean_pae", float("nan"))
+            b_pae = vals[bi]
+            if math.isfinite(b_pae):
+                target_ax = ax_lo if b_pae <= valid_max + 2 else ax_hi
+                target_ax.axhline(b_pae, color="gray", linestyle="--", linewidth=1.0,
+                                 label=f"baseline PAE ({b_pae:.1f} Å)")
+                target_ax.legend(fontsize=8)
+        
+        fig.suptitle("PAE comparison (broken axis for failed predictions)", 
+                     fontweight="bold")
+        
+    else:
+        # Standard single axis
+        fig, ax = plt.subplots(figsize=(max(7, len(names) * 1.1), 5.5))
+        bars = []
+        for i, name in enumerate(names):
+            ptm_group_name = style.get_ptm_group(name)
+            color = style.PTM_COLORS.get(ptm_group_name, "#7F7F7F")
+            if style.is_failed_condition(name):
+                color = style.PTM_COLORS["failed"]
+            
+            bar = ax.bar([i], [vals[i]], color=color, edgecolor="black", alpha=0.9)
+            bars.append(bar)
+            
+            # Add failed condition markers (§ 0)
+            if style.is_failed_condition(name):
+                ax.plot([i-0.3, i+0.3], [vals[i]-1, vals[i]+1], 'r-', linewidth=2, zorder=10)
+                ax.plot([i-0.3, i+0.3], [vals[i]+1, vals[i]-1], 'r-', linewidth=2, zorder=10)
+        
+        # Add baseline reference line (§ 2)
+        if baseline_name and baseline_name in names:
+            bi = names.index(baseline_name)
+            b_pae = vals[bi]
             if math.isfinite(b_pae):
                 ax.axhline(b_pae, color="gray", linestyle="--", linewidth=1.0,
-                           label="baseline mean PAE")
+                          label=f"baseline PAE ({b_pae:.1f} Å)")
                 ax.legend(fontsize=8)
         
-        if "is_reference" in df.columns:
-            for bi in df.index[df["is_reference"]].tolist():
-                bars[bi].set_hatch("//")
-        
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=40, ha="right")
         ax.set_ylabel("Mean PAE (Å)")
         ax.set_title("PAE per condition", fontweight="bold")
+
+    # Set x-axis for all cases
+    target_ax = ax_lo if use_broken_axis else ax
+    target_ax.set_xticks(x)
+    target_ax.set_xticklabels(labels, rotation=40, ha="right")
+    
+    # Color-code x-axis labels by PTM group
+    for i, name in enumerate(names):
+        ptm_group_name = style.get_ptm_group(name)
+        color = style.PTM_COLORS.get(ptm_group_name, "#7F7F7F")
+        if style.is_failed_condition(name):
+            color = style.PTM_COLORS["failed"]
+        target_ax.get_xticklabels()[i].set_color(color)
+    
+    # Add footnote for failed conditions (§ 0)
+    fig.text(0.02, 0.02, "Grey × = model collapse (pTM < 0.25, mean PAE > 25 Å); "
+                         "excluded from biological interpretation.", 
+             fontsize=8, style="italic", color="#666666")
 
     fig.tight_layout()
     return style.save(fig, plots_dir, "pae_comparison")

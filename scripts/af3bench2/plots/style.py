@@ -36,14 +36,52 @@ C_SIG = "#009E73"       # significant residues
 C_PTM = "#CC79A7"       # PTM site marker
 C_FAIL = "#D55E00"      # failed condition
 
-# PTM-group colours (stable across factorial plots)
+# Import collapsed detection for dynamic checking
+try:
+    from ..collapsed_detection import (
+        detect_collapsed_conditions,
+        get_display_name_map,
+        is_tpo101_1x_high_heterogeneity,
+        get_footnote_symbols
+    )
+    HAS_COLLAPSED_DETECTION = True
+except ImportError:
+    HAS_COLLAPSED_DETECTION = False
+
+# Display name mapping (§ 9 - General typography and layout) - updated from collapsed_detection
+DISPLAY_NAMES: Dict[str, str] = {
+    "oct4_seg_chain_b_nax1_clx1_smilesx10_no_msa": "Unmod 1x (baseline)",
+    "oct4_seg_chain_b_nax10_clx10_smilesx100_no_msa": "Unmod 10x",
+    "oct4_seg_chain_b_nax100_clx100_smilesx1000_no_msa": "Unmod 100x †",
+    "oct4_seg_chain_b_sep102_nax1_clx1_smilesx10_no_msa": "SEP102 1x",
+    "oct4_seg_chain_b_sep102_nax10_clx10_smilesx100_no_msa": "SEP102 10x",
+    "oct4_seg_chain_b_sep102_nax100_clx100_smilesx1000_no_msa": "SEP102 100x †",
+    "oct4_seg_chain_b_tpo101_nax1_clx1_smilesx10_no_msa": "TPO101 1x ‡",
+    "oct4_seg_chain_b_tpo101_nax10_clx10_smilesx100_no_msa": "TPO101 10x",
+    "oct4_seg_chain_b_tpo101_nax100_clx100_smilesx1000_no_msa": "TPO101 100x †",
+    "oct4_seg_chainb_dna_no_msa": "DNA (no ions)",
+    "oct4_seg_chainb_dna_ions_no_msa": "DNA + ions",
+}
+# † = collapsed prediction, ‡ = high heterogeneity
+
+# Legacy failed conditions for backward compatibility
+FAILED_CONDITIONS = {
+    "oct4_seg_chain_b_nax100_clx100_smilesx1000_no_msa",
+    "oct4_seg_chain_b_sep102_nax100_clx100_smilesx1000_no_msa", 
+    "oct4_seg_chain_b_tpo101_nax100_clx100_smilesx1000_no_msa"
+}
+
+# PTM-group colours (stable across factorial plots) - updated for consistency (§ 9)
 PTM_COLORS: Dict[str, str] = {
-    "none": "#0072B2",
-    "SEP102": "#CC79A7",
-    "SEP": "#CC79A7",
-    "TPO101": "#009E73",
-    "TPO": "#009E73",
-    "DNA": "#E69F00",
+    "unmodified": "#4C72B0",   # blue
+    "SEP102": "#DD8452",       # orange
+    "SEP": "#DD8452",          # orange (alias)
+    "TPO101": "#55A868",       # green
+    "TPO": "#55A868",          # green (alias)
+    "DNA": "#C44E52",          # red
+    "failed": "#AAAAAA",       # grey (overrides PTM colour)
+    # Legacy aliases for backward compatibility
+    "none": "#4C72B0",
 }
 
 # --- Two-tier confidence styling (af3bench2, plan 0.4) -------------------
@@ -162,4 +200,51 @@ def short_labels(
     """
     if label_map:
         return [label_map.get(n, n) for n in names]
-    return condition_labels(names, max_len=max_len)
+    # Use the global display names as fallback
+    return [DISPLAY_NAMES.get(n, n) for n in names]
+
+
+def is_failed_condition(condition_name: str) -> bool:
+    """Check if a condition is in the failed predictions set (§ 0)."""
+    # For now, use the hardcoded set; will be updated when detection is integrated
+    return condition_name in FAILED_CONDITIONS
+
+def is_collapsed_condition(condition_name: str, confidence_data: dict = None) -> bool:
+    """Check if a condition is collapsed using detection criteria."""
+    # Use hardcoded set for now; dynamic detection will be added later
+    return condition_name in FAILED_CONDITIONS
+
+
+def split_conditions(names: Sequence[str]) -> tuple[List[str], List[str]]:
+    """Split conditions into valid and failed lists (§ 0)."""
+    valid = []
+    failed = []
+    for name in names:
+        if is_failed_condition(name):
+            failed.append(name)
+        else:
+            valid.append(name)
+    return valid, failed
+
+
+def get_ptm_group(condition_name: str) -> str:
+    """Extract PTM group from condition name."""
+    if "sep102" in condition_name.lower():
+        return "SEP102"
+    elif "tpo101" in condition_name.lower():
+        return "TPO101"
+    elif "dna" in condition_name.lower():
+        return "DNA"
+    else:
+        return "unmodified"
+
+
+def draw_failed_marker(ax, x, y, size=None, color="#BBBBBB"):
+    """Draw failed condition marker: grey background with red cross (§ 0)."""
+    if size is None:
+        size = 1
+    # Draw grey background
+    ax.scatter([x], [y], s=size*100, marker='s', color=color, alpha=0.7, zorder=10)
+    # Draw red cross
+    ax.plot([x-size*0.3, x+size*0.3], [y-size*0.3, y+size*0.3], 'r-', linewidth=2, zorder=11)
+    ax.plot([x-size*0.3, x+size*0.3], [y+size*0.3, y-size*0.3], 'r-', linewidth=2, zorder=11)

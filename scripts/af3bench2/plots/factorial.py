@@ -110,6 +110,8 @@ def plot_concentration_response(
     confound_note: Optional[str] = None,
 ) -> List[Path]:
     """
+    Concentration-response with failed point marking and clear CI labels (§ 6).
+    
     data: {ptm_group: {tier: {"mean","lo","hi","n"}}}
     dna_groups: PTM-group names that are DNA conditions (drawn in a right panel).
     ligand_mult: {ptm_group: {tier: multiplier}} for per-point superscripts.
@@ -135,10 +137,42 @@ def plot_concentration_response(
             means = [data[ptm][t]["mean"] for t in tiers]
             lo = [max(0.0, data[ptm][t]["mean"] - data[ptm][t]["lo"]) for t in tiers]
             hi = [max(0.0, data[ptm][t]["hi"] - data[ptm][t]["mean"]) for t in tiers]
-            color = style.ptm_color(ptm)
-            label = ptm if ptm != "none" else "unmodified"
-            ax.errorbar(xs, means, yerr=[lo, hi], marker="o", linewidth=1.8,
-                        capsize=4, color=color, label=label, markersize=6)
+            
+            # Use updated color scheme (§ 9)
+            ptm_display = ptm if ptm != "none" else "unmodified"
+            color = style.PTM_COLORS.get(ptm_display, "#7F7F7F")
+            
+            # Identify failed points (§ 6)
+            failed_mask = [style.is_failed_condition(f"{ptm}_nax{t.rstrip('x')}_") for t in tiers]
+            
+            # Plot valid points as solid markers
+            valid_xs = [x for x, failed in zip(xs, failed_mask) if not failed]
+            valid_means = [m for m, failed in zip(means, failed_mask) if not failed]
+            valid_lo = [l for l, failed in zip(lo, failed_mask) if not failed]
+            valid_hi = [h for h, failed in zip(hi, failed_mask) if not failed]
+            
+            if valid_xs:
+                ax.errorbar(valid_xs, valid_means, yerr=[valid_lo, valid_hi], 
+                           marker="o", linewidth=1.8, capsize=4, color=color, 
+                           label=ptm_display, markersize=6, linestyle="-")
+            
+            # Plot failed points as hollow markers with dashed connection (§ 6)
+            failed_xs = [x for x, failed in zip(xs, failed_mask) if failed]
+            failed_means = [m for m, failed in zip(means, failed_mask) if failed]
+            
+            if failed_xs:
+                ax.scatter(failed_xs, failed_means, marker="o", s=40, 
+                          facecolors="none", edgecolors=style.PTM_COLORS["failed"],
+                          linewidths=2, zorder=5)
+                # Dashed line to failed points if there are preceding valid points
+                if valid_xs and failed_xs:
+                    last_valid_x = max(valid_xs)
+                    last_valid_mean = means[last_valid_x]
+                    first_failed_x = min(failed_xs)
+                    first_failed_mean = failed_means[0]
+                    ax.plot([last_valid_x, first_failed_x], [last_valid_mean, first_failed_mean],
+                           color=color, linestyle="--", linewidth=1.5, alpha=0.7)
+            
             # ligand-multiplier superscripts (plan 1.3b)
             if ligand_mult and ptm in ligand_mult:
                 for xi, t in zip(xs, tiers):
@@ -149,10 +183,10 @@ def plot_concentration_response(
                                     fontsize=6, color=color, ha="center")
             ax.set_xticks(xs)
             ax.set_xticklabels(tiers)
-        ax.set_xlabel("Salt-ion tier (Na+Cl; ligand co-scales at 5:1)")  # Issue 4 fix
+        ax.set_xlabel("Salt-ion tier (Na+Cl; ligand co-scales at 5:1)")
         ax.set_title(title, fontsize=10)
         
-        # Issue 4 fix: Add confound note as annotation box
+        # Add confound note as annotation box (§ 6)
         if confound_note:
             ax.annotate(
                 f"⚠ {confound_note}",
@@ -160,10 +194,20 @@ def plot_concentration_response(
                 va="top", ha="left", fontsize=7, color="#B05800",
                 bbox=dict(boxstyle="round,pad=0.3", fc="#FFF3E0", ec="#E69F00", alpha=0.9),
             )
+        
+        # Add noise floor band (§ 6)
+        ax.axhspan(0, 2, color="lightgray", alpha=0.3, label="noise floor")
 
     _draw(axes[0], ptm_groups, "PTM conditions")
     axes[0].set_ylabel("Mean Cα displacement vs baseline (Å)")
-    axes[0].legend(title="PTM group", fontsize=7)
+    
+    # Enhanced legend with failed point explanation (§ 6)
+    handles, labels = axes[0].get_legend_handles_labels()
+    from matplotlib.lines import Line2D
+    handles.append(Line2D([0], [0], marker="o", linestyle="", markersize=6,
+                         markerfacecolor="none", markeredgecolor=style.PTM_COLORS["failed"],
+                         markeredgewidth=2, label="collapsed prediction"))
+    axes[0].legend(handles=handles, title="PTM group", fontsize=7)
 
     # rank-swap detection between adjacent tiers (plan 1.3a)
     _annotate_rank_swaps(axes[0], data, ptm_groups)
@@ -172,10 +216,15 @@ def plot_concentration_response(
         _draw(axes[1], dna_present, "DNA conditions")
         axes[1].legend(fontsize=7)
 
+    # Clear error bar labeling (§ 6)
     sub = "Error bars: 95% CI across ensemble replicates per condition"
-    # Issue 4 fix: confound_note already shown in annotation box, remove from subtitle
     fig.suptitle(f"Concentration–response  |  baseline: {baseline_name}\n{sub}",
                  fontweight="bold", fontsize=10)
+    
+    # Add footnote for failed conditions (§ 0)
+    fig.text(0.02, 0.02, "Grey open circles = model collapse; excluded from biological interpretation", 
+             fontsize=8, style="italic", color="#666666")
+    
     fig.tight_layout()
     return style.save(fig, plots_dir, "concentration_response")
 
@@ -220,43 +269,94 @@ def plot_ptm_effect_grid(
     nclusters_grid: Optional[np.ndarray] = None,
     noise_grid: Optional[np.ndarray] = None,
     dna_rows: Optional[List[int]] = None,
-    artifact_mask: Optional[np.ndarray] = None,  # NEW: marks artifact cells
+    artifact_mask: Optional[np.ndarray] = None,
 ) -> List[Path]:
+    """
+    PTM effect grid with rescaled color for valid cells only (§ 5) and failed condition treatment.
+    """
     if grid.size == 0:
         return []
     n_rows, n_cols = grid.shape
+    
+    # Create artifact mask from failed conditions if not provided (§ 5)
+    if artifact_mask is None:
+        artifact_mask = np.zeros((n_rows, n_cols), dtype=bool)
+        for ri, ptm in enumerate(ptm_order):
+            for ci, tier in enumerate(tier_order):
+                # Construct typical condition name pattern to check
+                condition_patterns = [
+                    f"oct4_seg_chain_b_{ptm.lower()}_{tier.lower().replace('x', 'x')}_",
+                    f"oct4_seg_chain_b_nax{tier.rstrip('x')}_" if ptm == "unmodified" else f"oct4_seg_chain_b_{ptm.lower()}_nax{tier.rstrip('x')}_"
+                ]
+                for pattern in condition_patterns:
+                    if any(style.is_failed_condition(fc) and pattern in fc for fc in style.FAILED_CONDITIONS):
+                        artifact_mask[ri, ci] = True
+                        break
+    
+    # Compute color scale using only valid cells (§ 5)
+    valid_mask = np.isfinite(grid) & (~artifact_mask)
+    if measured_mask is not None:
+        valid_mask = valid_mask & measured_mask
+    
+    if np.any(valid_mask):
+        valid_values = grid[valid_mask]
+        vmin = 0  # Always start from 0
+        vmax = float(np.nanmax(valid_values))
+    else:
+        vmin, vmax = 0, 1
+    
     fig, ax = plt.subplots(figsize=(max(5, n_cols * 1.7 + 1), max(3.5, n_rows * 1.35 + 1)))
-    masked = np.ma.masked_invalid(grid)
-    im = ax.imshow(masked, cmap="YlOrRd", vmin=0, aspect="auto")
+    
+    # Create masked array for display
+    display_grid = np.copy(grid)
+    display_grid[artifact_mask] = np.nan  # Hide artifact values from colormap
+    masked = np.ma.masked_invalid(display_grid)
+    
+    im = ax.imshow(masked, cmap="YlOrRd", vmin=vmin, vmax=vmax, aspect="auto")
     fig.colorbar(im, ax=ax, label="Mean Cα displacement (Å)", shrink=0.85)
 
     ax.set_xticks(range(n_cols))
     ax.set_yticks(range(n_rows))
     ax.set_xticklabels(tier_order)
-    ax.set_yticklabels([p if p != "none" else "unmodified" for p in ptm_order])
-    ax.set_xlabel("Salt-ion tier (Na+Cl; ligand co-scales at 5:1)")  # Issue 4 fix
+    ax.set_yticklabels([p if p != "unmodified" else "unmodified" for p in ptm_order])
+    ax.set_xlabel("Salt-ion tier (Na+Cl; ligand co-scales at 5:1)")
     ax.set_ylabel("PTM group")
     ax.set_title(
         f"PTM × salt+ligand tier effect grid\n"
         f"baseline: {baseline_name}\n"
-        f"⚠ ligand co-scales with salt — axis reflects both",
+        f"Color scale: valid predictions only (0–{vmax:.1f} Å)",
         fontweight="bold", fontsize=9,
-    )  # Issue 4 fix
+    )
     ax.grid(False)
     ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
     ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
 
-    vmax = float(np.nanmax(grid)) if np.any(np.isfinite(grid)) else 1.0
+    # Cell annotations with improved failed condition treatment (§ 5)
     for ri in range(n_rows):
         for ci in range(n_cols):
             v = grid[ri, ci]
             measured = (measured_mask is None) or bool(measured_mask[ri, ci])
+            is_artifact = bool(artifact_mask[ri, ci])
+            
             if not measured:
                 # not-measured: leave white, no text (plan 1.2a)
                 ax.add_patch(Rectangle((ci - 0.5, ri - 0.5), 1, 1,
                                        facecolor="white", edgecolor="#dddddd",
                                        zorder=2))
                 continue
+            
+            if is_artifact:
+                # Failed condition: grey with red cross, remove numerical value (§ 5)
+                ax.add_patch(Rectangle((ci - 0.5, ri - 0.5), 1, 1,
+                                       facecolor=style.PTM_COLORS["failed"], 
+                                       edgecolor="black", zorder=2))
+                # Draw red cross
+                ax.plot([ci-0.3, ci+0.3], [ri-0.3, ri+0.3], 'r-', linewidth=3, zorder=4)
+                ax.plot([ci-0.3, ci+0.3], [ri+0.3, ri-0.3], 'r-', linewidth=3, zorder=4)
+                ax.text(ci, ri, "collapsed\nprediction", ha="center", va="center", 
+                        fontsize=6, color="white", fontweight="bold", zorder=5)
+                continue
+            
             if not np.isfinite(v):
                 # measured but no value → n.s. light-gray hatched
                 ax.add_patch(Rectangle((ci - 0.5, ri - 0.5), 1, 1,
@@ -266,6 +366,7 @@ def plot_ptm_effect_grid(
                         color="#666666")
                 continue
 
+            # Valid measured value
             txt = f"{v:.1f}"
             ns = bool(ns_mask[ri, ci])
             if ns:
@@ -275,16 +376,18 @@ def plot_ptm_effect_grid(
             if nclusters_grid is not None and nclusters_grid[ri, ci] > 4:
                 txt += " ⚠"
             
-            # NEW: Check if this cell is an artifact
-            is_artifact = (artifact_mask is not None and 
-                          artifact_mask[ri, ci])
+            # Bold border for key biological contrasts (§ 5)
+            is_key_contrast = (
+                (ri == ptm_order.index("TPO101") if "TPO101" in ptm_order else False and 
+                 ci == tier_order.index("1x") if "1x" in tier_order else False) or
+                (ri == ptm_order.index("SEP102") if "SEP102" in ptm_order else False and 
+                 ci == tier_order.index("1x") if "1x" in tier_order else False)
+            )
             
-            if is_artifact:
-                # Overlay hatching for artifact cells
+            if is_key_contrast:
                 ax.add_patch(Rectangle((ci - 0.5, ri - 0.5), 1, 1,
-                                       fill=False, hatch="///",
-                                       edgecolor="#B2182B", linewidth=1.8, zorder=3))
-                txt += "\nartifact"
+                                       fill=False, edgecolor="black",
+                                       linewidth=3, zorder=3))
             
             ax.text(ci, ri, txt, ha="center", va="center", fontsize=7,
                     fontweight="bold",
@@ -297,19 +400,27 @@ def plot_ptm_effect_grid(
                                            fill=False, edgecolor="black",
                                            linestyle="--", linewidth=1.6, zorder=3))
 
+    # Add 0x column as n/a for PTM conditions (§ 5)
+    if "0x" not in tier_order:
+        # This would need to be handled at data preparation level
+        pass
+
     # DNA separator (plan 1.2d)
     if dna_rows:
         top = min(dna_rows)
         ax.axhline(top - 0.5, color="black", linewidth=2.2, zorder=4)
-        # Issue 6 fix: Enhanced DNA separator label
         ax.annotate(
             "DNA conditions\n(qualitatively distinct perturbation)",
             xy=(-0.02, top - 0.5),
             xycoords=("axes fraction", "data"),
             ha="right", va="center", fontsize=7.5, fontweight="bold",
             annotation_clip=False,
-            color=style.ptm_color("DNA"),
+            color=style.PTM_COLORS["DNA"],
         )
+
+    # Add footnote for failed conditions (§ 0)
+    fig.text(0.02, 0.02, "Grey × = model collapse; values not interpretable", 
+             fontsize=8, style="italic", color="#666666")
 
     fig.tight_layout()
     return style.save(fig, plots_dir, "ptm_effect_grid")

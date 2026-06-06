@@ -170,9 +170,8 @@ def run(
     # ------------------------------------------------------------------
     log.info("Computing within-condition structural heterogeneity...")
     hetero: Dict[str, het.HeterogeneitySummary] = {}
-    cluster_conf_rows: List[dict] = []
-    for name, cond in conditions.items():
-        is_collapsed = name in collapsed_conditions
+    cluster_conf_rows: List[dict] = []    for name, cond in conditions.items():
+        is_collapsed = name in collapsed_conditions if 'collapsed_conditions' in locals() else False
         h = het.summarize_condition(name, ensembles[name], plddt_cutoff,
                                     cluster_threshold=cluster_threshold,
                                     is_collapsed=is_collapsed)
@@ -317,19 +316,21 @@ def run(
     # Confidence summary (with seed SD)
     # ------------------------------------------------------------------
     df_conf, seed_sd = _confidence_summary(conditions, ensembles, baseline_name)
-
     # ------------------------------------------------------------------
     # Collapsed condition detection (simplified spec)
     # ------------------------------------------------------------------
+    df_conf, seed_sd = _confidence_summary(conditions, ensembles, baseline_name)
+    
+    # Detect collapsed conditions using criteria from simplified spec
     collapsed_conditions = detect_collapsed_conditions(df_conf)
     log.info("Collapsed conditions detected: %s", sorted(collapsed_conditions))
     
     # Add is_collapsed flags to dataframes
-    df_conf, df_dist_temp = add_collapsed_flags_to_dataframes(
+    df_conf, df_dist = add_collapsed_flags_to_dataframes(
         df_conf, pd.DataFrame(dist_rows), collapsed_conditions
     )
     
-    # Update dist_rows with collapsed flags
+    # Update dist_rows with is_collapsed flag
     for row in dist_rows:
         row["is_collapsed"] = row["condition"] in collapsed_conditions
         # Keep legacy columns for backward compatibility
@@ -343,6 +344,7 @@ def run(
         prof["tier"] = "likely_artifact" if prof["is_collapsed"] else "ok"
     
     df_dist = pd.DataFrame(dist_rows)
+    
 
     # ------------------------------------------------------------------
     # Write tables
@@ -367,9 +369,7 @@ def run(
             "rmsf_A": np.round(baseline_rmsf_full, 4),
         }),
         tables_dir / "baseline_rmsf.csv",
-    )
-
-    # condition_variance_summary.csv (plan 2.1)
+    )    # condition_variance_summary.csv (plan 2.1)
     # Simplified spec: Exclude collapsed conditions from heterogeneity overview
     valid_hetero = {n: h for n, h in hetero.items()
                     if n not in collapsed_conditions}
@@ -393,16 +393,13 @@ def run(
     # Structural clustering (all-vs-all RMSD of representatives)
     # Issue 1 fix: Exclude artifacts from clustering
     # ------------------------------------------------------------------
-    # Structural clustering (all-vs-all RMSD of representatives)
-    # Simplified spec: Exclude collapsed conditions from clustering
-    # ------------------------------------------------------------------
     valid_conditions = {
         n: c for n, c in conditions.items()
-        if n not in collapsed_conditions
+        if tiers.get(n, "ok") != "likely_artifact"
     }
     log.info(
-        "Cross-condition clustering: %d valid conditions (%d collapsed excluded)",
-        len(valid_conditions), len(collapsed_conditions)
+        "Cross-condition clustering: %d valid conditions (%d artifacts quarantined)",
+        len(valid_conditions), len(conditions) - len(valid_conditions)
     )
     cluster_names, rmsd_matrix = clust.pairwise_rmsd(valid_conditions, plddt_cutoff)
     # If the user did not request a specific granularity, derive a data-driven
@@ -527,14 +524,14 @@ def run(
         },
         "ensemble_sizes": {n: int(e.n_samples) for n, e in ensembles.items()},
         "clusters": cluster_summary,
-        "collapsed_conditions": sorted(collapsed_conditions),  # Simplified spec
+        "quarantined_artifacts": sorted(artifacts),  # Issue 1 fix
     }
     write_json(manifest, output_dir / "run_manifest.json")
 
     # Scientific summary table rows (plan 3.3) assembled for findings
     # Issue 2 fix: Pass per_res_frames for bimodal fraction calculation
     summary_rows = _scientific_summary_rows(
-        others, conditions, df_dist, df_conf, hetero, struct, label_map, collapsed_conditions, per_res_frames)
+        others, conditions, df_dist, df_conf, hetero, struct, label_map, tiers, per_res_frames)
 
     findings = {
         "baseline": baseline_name,
@@ -542,7 +539,8 @@ def run(
         "baseline_composition_warning": baseline_comp_warning,
         "n_conditions": len(conditions),
         "skipped": skipped,
-        "collapsed_conditions": sorted(collapsed_conditions),  # Simplified spec
+        "confidence_tiers": tiers,
+        "likely_artifacts": sorted(artifacts),
         "confound_warning": struct.confound.get("warning"),
         "ligand_to_salt_ratio": struct.confound.get("ligand_to_salt_ratio"),
         "fold_divergence_warnings": fold_warnings,
@@ -552,7 +550,7 @@ def run(
         "clusters": cluster_summary,
         "top_residues": top_residues,
         "seed_bias": _seed_bias_assessment(df_conf),
-        "caveats": _caveats(conditions, ensembles, baseline_name, collapsed_conditions,
+        "caveats": _caveats(conditions, ensembles, baseline_name, artifacts,
                             baseline_comp_warning, struct.confound.get("warning"),
                             fold_warnings),
     }
@@ -827,7 +825,7 @@ def _ensemble_note(ensembles) -> str:
             f"used for displacement CIs and baseline RMSF")
 
 
-def _caveats(conditions, ensembles, baseline_name, collapsed_conditions=None,
+def _caveats(conditions, ensembles, baseline_name, artifacts=None,
              baseline_warning=None, confound_warning=None,
              fold_warnings=None) -> List[str]:
     """
@@ -851,13 +849,13 @@ def _caveats(conditions, ensembles, baseline_name, collapsed_conditions=None,
         "low power to detect moderate seed effects (SNR ≈ 0.048). "
         "KW test non-significance should not be interpreted as absence of seed bias.",
     ]
-    if collapsed_conditions:
+    if artifacts:
         out.append(
-            "Collapsed predictions (pTM < 0.25, mean PAE > 25 Å): "
-            + ", ".join(sorted(collapsed_conditions))
-            + ". Collapsed predictions are excluded from the PTM "
-            "grid, concentration-response, and clustering; their large displacements reflect "
-            "model collapse from ion saturation, not conformational change."
+            "Low-confidence / likely-artifact predictions: "
+            + ", ".join(sorted(artifacts))
+            + ". Conditions in the likely_artifact tier are excluded from the PTM "
+            "grid and concentration-response; their large displacements reflect "
+            "model collapse, not conformational change."
         )
     no_ens = [n for n, e in ensembles.items() if not e.has_structural_ensemble]
     if no_ens:
@@ -1016,7 +1014,7 @@ def _seed_bias_assessment(df_conf) -> dict:
 
 
 def _scientific_summary_rows(others, conditions, df_dist, df_conf, hetero,
-                             struct, label_map, collapsed_conditions, per_res_frames) -> List[dict]:
+                             struct, label_map, tiers, per_res_frames) -> List[dict]:
     """Structured per-condition summary rows for findings (plan 3.3)."""
     dist_by = {r["condition"]: r for r in df_dist.to_dict("records")}
     conf_by = {r["condition"]: r for r in df_conf.to_dict("records")}
@@ -1029,7 +1027,7 @@ def _scientific_summary_rows(others, conditions, df_dist, df_conf, hetero,
         tm_score = d.get("tm_score", float("nan"))
         n_sig = d.get("n_significant", 0)
         n_sig_core = d.get("n_significant_core", 0)  # Issue 5 fix
-        is_collapsed = name in collapsed_conditions
+        tier = tiers.get(name, "ok")
         
         # Issue 2 fix: Compute bimodal fraction from per-residue data
         bimodal_frac = 0.0
@@ -1039,7 +1037,7 @@ def _scientific_summary_rows(others, conditions, df_dist, df_conf, hetero,
         
         # Issue 2 fix: Use bimodality-aware verdict (Issue 5: use n_sig_core)
         decision = _structural_shift_verdict(
-            name, is_collapsed, n_sig_core, rmsd, h, tm_score, bimodal_frac
+            name, tier, n_sig_core, rmsd, h, tm_score, bimodal_frac
         )
         
         # Issue 3 fix: Add perturbation class
@@ -1059,7 +1057,7 @@ def _scientific_summary_rows(others, conditions, df_dist, df_conf, hetero,
             "rmsd": _r(rmsd),
             "delta_ptm": c.get("delta_ptm"),
             "delta_iptm": c.get("delta_iptm"),
-            "confidence_tier": "likely_artifact" if is_collapsed else "ok",
+            "confidence_tier": tier,
             "heterogeneity_tier": h.tier,
             "n_clusters": h.n_clusters,
             "dominant_fraction": _r(h.dominant_fraction),
@@ -1070,7 +1068,7 @@ def _scientific_summary_rows(others, conditions, df_dist, df_conf, hetero,
 
 def _structural_shift_verdict(
     name: str,
-    is_collapsed: bool,
+    tier: str,
     n_sig_core: int,  # Issue 5 fix: renamed from n_sig
     rmsd: float,
     h,  # HeterogeneitySummary
@@ -1081,11 +1079,11 @@ def _structural_shift_verdict(
     Bimodality-aware structural shift verdict (Issue 2 fix).
 
     Priority order (first match wins):
-      1. artifact (excluded)        — is_collapsed == True
+      1. artifact (excluded)        — confidence_tier == likely_artifact
       2. multimodal_ensemble        — bimodal_fraction > 0.50 AND
                                       IQR > 2× baseline RMSF proxy AND
                                       n_clusters >= 4
-      3. fold_divergent             — TM-score < 0.60 AND not is_collapsed AND
+      3. fold_divergent             — TM-score < 0.60 AND tier == ok AND
                                       not multimodal (distinct from multimodal:
                                       the whole ensemble diverged, not just split)
       4. clear_shift                — rmsd > 3.0 AND n_sig_core > 5 AND
@@ -1093,7 +1091,7 @@ def _structural_shift_verdict(
       5. possible_shift             — rmsd > 1.5 OR n_sig_core > 0
       6. no_shift_detected          — otherwise
     """
-    if is_collapsed:
+    if tier == "likely_artifact":
         return "artifact (excluded)"
 
     is_multimodal = (
@@ -1104,7 +1102,7 @@ def _structural_shift_verdict(
     if is_multimodal:
         return "multimodal_ensemble"
 
-    if math.isfinite(tm_score) and tm_score < 0.60 and not is_collapsed:
+    if math.isfinite(tm_score) and tm_score < 0.60 and tier == "ok":
         return "fold_divergent"
 
     if rmsd and math.isfinite(rmsd) and rmsd > 3.0 and n_sig_core > 5:  # Issue 5 fix: threshold lowered

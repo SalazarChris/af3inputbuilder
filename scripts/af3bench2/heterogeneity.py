@@ -80,13 +80,19 @@ def _entropy_bits(fractions: np.ndarray) -> float:
     return float(-np.sum(f * np.log2(f)))
 
 
-def _assign_tier(n_clusters: int, dominant_fraction: float) -> str:
-    """heterogeneity_tier per plan 2.1."""
-    if n_clusters <= 2 and dominant_fraction >= 0.85:
-        return "low"
-    if n_clusters <= 4 and dominant_fraction >= 0.70:
+def _assign_tier(n_clusters: int, dominant_fraction: float, is_collapsed: bool = False) -> str:
+    """heterogeneity_tier per simplified spec criteria."""
+    if is_collapsed:
+        return "collapsed"
+    
+    if n_clusters > 5 or dominant_fraction < 0.50:
+        return "high"
+    
+    if n_clusters in [2, 3, 4, 5]:  # n_clusters in [2, 5]
         return "moderate"
-    return "high"
+    
+    # n_clusters == 1
+    return "low"
 
 
 def summarize_condition(
@@ -94,6 +100,7 @@ def summarize_condition(
     ensemble,
     plddt_cutoff: float = 50.0,
     cluster_threshold: float = 3.0,
+    is_collapsed: bool = False,
 ) -> HeterogeneitySummary:
     """
     Compute within-condition heterogeneity from an EnsembleModel.
@@ -120,7 +127,7 @@ def summarize_condition(
     if S < 10:
         summ.n_clusters = 1
         summ.dominant_fraction = 1.0
-        summ.tier = "low"
+        summ.tier = "collapsed" if is_collapsed else "low"
         summ.cluster_assignments = [1] * S
         summ.ptm_cv = _cv(ensemble.ptm)
         summ.plddt_cv = _cv(ensemble.plddt_mean)
@@ -175,7 +182,7 @@ def summarize_condition(
     summ.n_clusters = int(uniq.size)
     summ.dominant_fraction = float(fractions.max())
     summ.cluster_entropy = _entropy_bits(fractions)
-    summ.tier = _assign_tier(summ.n_clusters, summ.dominant_fraction)
+    summ.tier = _assign_tier(summ.n_clusters, summ.dominant_fraction, is_collapsed)
     return summ
 
 

@@ -36,6 +36,14 @@ _WATER_SMILES = {"O", "[OH2]", "OO"}  # AF3 uses bare "O" for water in these inp
 
 _NUCLEIC = {"dna", "rna"}
 
+# CCD monomer codes for nucleotides.  A DNA/RNA molecule supplied as a
+# *nonpolymer ligand* entity (rather than a proper ``dna``/``rna`` polymer
+# entity) is identified by these codes so it is treated as nucleic acid, not as
+# a small-molecule ligand.  DNA monomers are prefixed 'D'.
+_DNA_CCDS = {"DA", "DC", "DG", "DT", "DU", "DI", "DN"}
+_RNA_CCDS = {"A", "C", "G", "U", "I", "N"}
+_NUCLEIC_CCDS = _DNA_CCDS | _RNA_CCDS
+
 
 def _entity_ids(v: dict) -> List[str]:
     raw = v.get("id", "")
@@ -60,15 +68,30 @@ def _ccd_codes(v: dict) -> List[str]:
 
 def classify_nonpolymer(v: dict) -> str:
     """
-    Classify a ligand/ion/solvent entity as one of: 'ion', 'water', 'ligand'.
+    Classify a ligand/ion/solvent entity as one of:
+    'ion', 'water', 'nucleic', 'ligand'.
 
-    Decision order: CCD ion code -> CCD/SMILES water -> SMILES heavy-atom ligand
-    -> fallback 'ligand'.
+    A DNA/RNA molecule is sometimes supplied as a nonpolymer ligand entity
+    (its monomers given as nucleotide CCD codes, e.g. ``ccdCodes: [DA, DT, DG]``)
+    rather than as a proper ``dna``/``rna`` polymer entity.  Such an entity is
+    classified as ``'nucleic'`` so it is routed to the nucleic-acid bucket and
+    never counted as a small-molecule ligand.
+
+    Decision order: nucleotide CCDs -> CCD ion code -> CCD/SMILES water ->
+    SMILES heavy-atom ligand -> fallback 'ligand'.
     """
     ccds = _ccd_codes(v)
     smiles = (v.get("smiles") or "").strip()
 
     if ccds:
+        # A run of nucleotide monomers (≥2) is a nucleic-acid oligomer supplied
+        # as a ligand entity.  A single nucleotide CCD is genuinely ambiguous
+        # (e.g. a mononucleotide cofactor) and is left as a ligand.
+        if all(c in _NUCLEIC_CCDS for c in ccds) and len(ccds) >= 2:
+            return "nucleic"
+        # DNA-specific codes are unambiguous even as a single monomer.
+        if all(c in _DNA_CCDS for c in ccds):
+            return "nucleic"
         if all(c in _ION_CCDS for c in ccds):
             return "ion"
         if all(c in _WATER_CCDS for c in ccds):
@@ -79,6 +102,8 @@ def classify_nonpolymer(v: dict) -> str:
     if smiles:
         if smiles in _WATER_SMILES:
             return "water"
+        if _is_nucleic_smiles(smiles):
+            return "nucleic"
         # crude heavy-atom proxy: SMILES longer than a couple of chars
         if len(smiles) > 3:
             return "ligand"
@@ -86,6 +111,22 @@ def classify_nonpolymer(v: dict) -> str:
         return "ligand"
 
     return "ligand"
+
+
+def _is_nucleic_smiles(smiles: str) -> bool:
+    """
+    Heuristic: does a SMILES string describe a nucleic-acid oligonucleotide?
+
+    A DNA/RNA strand given as SMILES contains a repeating sugar-phosphate
+    backbone.  We require (a) at least two phosphate groups (``P(=O)``/``OP``)
+    and (b) recognisable nucleobase ring systems, to avoid flagging a single
+    phosphorylated small molecule (e.g. a nucleotide cofactor) as a strand.
+    """
+    s = smiles.upper()
+    n_phosphate = s.count("P(=O)") + s.count("OP(") + s.count("P(O)")
+    has_base = ("N1C=NC2" in s or "NC=NC" in s or "C1=CN" in s
+                or "N=CN" in s or "NC(=O)N" in s)
+    return n_phosphate >= 2 and has_base
 
 
 def parse_condition_factors(data_json: Path) -> dict:
@@ -152,6 +193,20 @@ def parse_condition_factors(data_json: Path) -> dict:
             else:
                 kind = classify_nonpolymer(v)
                 ccds = _ccd_codes(v)
+                if kind == "nucleic":
+                    # DNA/RNA supplied as a nonpolymer ligand entity: treat as
+                    # nucleic acid, not a small-molecule ligand.  Its chains are
+                    # added to the nucleic set so has_dna is set correctly and
+                    # the ligand factor stays clean.
+                    nucleic_ids.extend(ids)
+                    smiles = (v.get("smiles") or "")
+                    label = "/".join(ccds) if ccds else (
+                        smiles[:12] + ("..." if len(smiles) > 12 else ""))
+                    parts.append(
+                        f"dna_ligand(chain{'s' if count > 1 else ''}="
+                        f"{','.join(ids) if ids else label} x{count})"
+                    )
+                    continue
                 if kind == "ion":
                     code = ccds[0] if ccds else "ION"
                     if code == "NA":

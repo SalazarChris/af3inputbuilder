@@ -197,6 +197,44 @@ def test_classify_nonpolymer():
     assert factors.classify_nonpolymer({"smiles": "CCO"}) == "ligand"
 
 
+def test_classify_nonpolymer_dna_as_ligand():
+    # DNA oligo supplied as a nonpolymer ligand entity (nucleotide CCD codes)
+    assert factors.classify_nonpolymer({"ccdCodes": ["DA", "DT", "DG", "DC"]}) == "nucleic"
+    # a single DNA monomer is still unambiguously nucleic (D-prefixed)
+    assert factors.classify_nonpolymer({"ccdCodes": ["DA"]}) == "nucleic"
+    # a single bare-purine RNA monomer is ambiguous → stays a ligand
+    assert factors.classify_nonpolymer({"ccdCodes": ["A"]}) == "ligand"
+    # an RNA oligo (≥2 nucleotide monomers) is nucleic
+    assert factors.classify_nonpolymer({"ccdCodes": ["A", "U", "G", "C"]}) == "nucleic"
+
+
+def test_factors_dna_ligand_not_counted_as_ligand(tmp_path):
+    # A DNA molecule provided as a ligand entity must be routed to the nucleic
+    # bucket: has_dna True, has_real_ligand False, no SMILES/ligand inflation.
+    seqs = [
+        {"protein": {"id": "A", "sequence": "ACDEFG", "modifications": []}},
+        {"ligand": {"id": ["B"], "ccdCodes": ["DA", "DT", "DG", "DC"]}},
+    ]
+    f = factors.parse_condition_factors(_write_data_json(tmp_path, seqs))
+    assert f["has_dna"] is True
+    assert f["has_real_ligand"] is False
+    assert f["n_ligand"] == 0
+    assert "B" in f["nucleic_chain_ids"]
+
+
+def test_factors_real_ligand_still_detected_alongside_dna(tmp_path):
+    # A genuine small-molecule ligand must still register even when DNA present.
+    seqs = [
+        {"protein": {"id": "A", "sequence": "ACDEFG", "modifications": []}},
+        {"dna": {"id": "B", "sequence": "ACGT"}},
+        {"ligand": {"id": ["L"], "smiles": "CC(=O)OC1=CC=CC=C1C(=O)O"}},
+    ]
+    f = factors.parse_condition_factors(_write_data_json(tmp_path, seqs))
+    assert f["has_dna"] is True
+    assert f["has_real_ligand"] is True
+    assert f["n_ligand"] == 1
+
+
 def test_build_experiment_structure_ion_tier_excludes_water():
     c1 = ConditionModel("c_1x", Path("a"))
     c1.n_na, c1.n_cl, c1.n_water = 1, 1, 10

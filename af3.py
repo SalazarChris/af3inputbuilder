@@ -39,6 +39,7 @@ _REQUIRED_PACKAGES = [
     ("matplotlib", "matplotlib>=3.7.0"),
     ("Bio",        "biopython>=1.81"),
     ("tmtools",    "tmtools"),
+    ("sklearn",    "scikit-learn"),
 ]
 
 
@@ -413,7 +414,7 @@ def run_analysis():
     # ------------------------------------------------------------------
     # Build command
     # ------------------------------------------------------------------
-    cmd = [sys.executable, os.path.join(_SCRIPTS, "af3_bench.py")]
+    cmd = [sys.executable, os.path.join(_SCRIPTS, "af3_analysis.py")]
     cmd += ["--models", models]
     cmd += ["--output", output]
 

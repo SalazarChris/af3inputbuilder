@@ -62,16 +62,6 @@ def _cv(values: np.ndarray) -> float:
     return float(np.std(v, ddof=1) / abs(m))
 
 
-def _pairwise_rmsd(coords: np.ndarray, fit_mask: np.ndarray) -> np.ndarray:
-    """Symmetric S×S Cα RMSD matrix between ensemble replicates."""
-    S = coords.shape[0]
-    mat = np.zeros((S, S), dtype=np.float64)
-    for i in range(S):
-        for j in range(i + 1, S):
-            _, _, rmsd = geom.kabsch(coords[i][fit_mask], coords[j][fit_mask])
-            mat[i, j] = mat[j, i] = rmsd
-    return mat
-
 
 def _entropy_bits(fractions: np.ndarray) -> float:
     f = fractions[fractions > 0]
@@ -187,7 +177,7 @@ def summarize_condition(
     # Cluster replicates by pairwise RMSD
     labels = np.ones(S, dtype=int)
     if HAS_SCIPY and S >= 2:
-        pw = _pairwise_rmsd(aligned, fit_mask)
+        pw = geom.pairwise_rmsd(aligned, fit_mask)
         condensed = squareform(pw, checks=False)
         if condensed.size and np.any(condensed > 0):
             Z = linkage(condensed, method="average")

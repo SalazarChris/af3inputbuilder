@@ -230,6 +230,18 @@ def ensemble_rmsf(
     return np.sqrt(np.mean(sq, axis=0))               # (N,) RMS over samples
 
 
+def pairwise_rmsd(coords: np.ndarray, fit_mask: np.ndarray) -> np.ndarray:
+    """Symmetric S×S Cα RMSD matrix between ensemble replicates."""
+    S = coords.shape[0]
+    mat = np.zeros((S, S), dtype=np.float64)
+    for i in range(S):
+        for j in range(i + 1, S):
+            _, _, rmsd = kabsch(coords[i][fit_mask], coords[j][fit_mask])
+            mat[i, j] = mat[j, i] = rmsd
+    return mat
+
+
+
 # ---------------------------------------------------------------------------
 # TM-score
 # ---------------------------------------------------------------------------

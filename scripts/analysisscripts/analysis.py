@@ -585,7 +585,7 @@ def run(
             "skipped. condition_pairs.csv will not be written."
         )
     fold_rows, fold_warnings = _fold_divergence(
-        df_dist, baseline_name, compute_tm
+        df_dist, baseline_name, compute_tm, conditions
     )
     if fold_rows:
         write_csv(pd.DataFrame(fold_rows), tables_dir / "condition_pairs.csv")
@@ -637,7 +637,7 @@ def run(
         
         # Cycle 12: New summary visualizations
         # PTM × concentration effect grid
-        ptm_grid_data = _build_ptm_grid_data(conditions, df_dist, hetero, struct)
+        ptm_grid_data = _build_ptm_grid_data(conditions, df_dist, hetero, struct, baseline_name)
         written_plots += plot_sum.plot_ptm_concentration_effect_grid(
             ptm_grid_data, plots_dir, label_map=label_map, 
             ion_tier=struct.ion_tier, baseline_name=baseline_name)
@@ -740,8 +740,6 @@ def run(
 
     # Baseline ensemble metrics for Cycle 11 (baseline ensemble characterization)
     baseline_violin_data = _baseline_violin_data(baseline_name, ensembles)
-    baseline_cluster_info = _baseline_cluster_analysis(
-        baseline_name, ensembles, plddt_cutoff, cluster_threshold)
     baseline_pairwise_rmsd = _baseline_pairwise_rmsd_distribution(
         baseline_name, ensembles, plddt_cutoff)
     baseline_confidence_metrics = _baseline_confidence_metrics(baseline_name, ensembles)
@@ -797,16 +795,6 @@ def run(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _pairwise_rmsd(coords: np.ndarray, fit_mask: np.ndarray) -> np.ndarray:
-    """Symmetric S×S Cα RMSD matrix between ensemble replicates."""
-    S = coords.shape[0]
-    mat = np.zeros((S, S), dtype=np.float64)
-    for i in range(S):
-        for j in range(i + 1, S):
-            _, _, rmsd = geom.kabsch(coords[i][fit_mask], coords[j][fit_mask])
-            mat[i, j] = mat[j, i] = rmsd
-    return mat
 
 
 def _r(v, n=4):
@@ -977,7 +965,8 @@ def _ref_grid_cell(struct, baseline_name, grid_rows, grid_cols):
 def _build_ptm_grid_data(conditions: Dict[str, ConditionModel], 
                          df_dist: pd.DataFrame,
                          hetero: Dict[str, het.HeterogeneitySummary],
-                         struct) -> pd.DataFrame:
+                         struct,
+                         baseline_name: str) -> pd.DataFrame:
     """
     Build PTM × concentration grid data for visualization.
     
@@ -986,9 +975,8 @@ def _build_ptm_grid_data(conditions: Dict[str, ConditionModel],
     """
     rows = []
     for name, cond in conditions.items():
-        # Skip baseline (baseline gets "baseline (...)" prefix in label_short)
-        if struct.label_short.get(name, name) != name:
-            # This is the baseline
+        # Skip baseline
+        if name == baseline_name:
             continue
         
         ptm = struct.ptm_group.get(name, "none")
@@ -1062,7 +1050,11 @@ def _factorial_plots(conditions, ensembles, struct, baseline, baseline_name,
                 baseline, cond, ensembles[name], plddt_cutoff
             )
 
-        rmsf_shared = np.array([rmsf_lookup.get(k, np.nan) for k in shared_keys])
+        if cached.get("baseline_rmsf") is not None:
+            rmsf_shared = cached["baseline_rmsf"]
+        else:
+            rmsf_shared = np.array([rmsf_lookup.get(k, np.nan) for k in shared_keys])
+
         mean_disp = float(np.nanmean(disp_mat))
         per_res_mean = np.nanmean(disp_mat, axis=0)
 
@@ -1293,14 +1285,12 @@ def _baseline_violin_data(baseline_name: str, ensembles: Dict[str, EnsembleModel
     ptm = np.asarray(base_ens.ptm, dtype=float) if hasattr(base_ens, 'ptm') else np.empty(0)
     iptm = np.asarray(base_ens.iptm, dtype=float) if hasattr(base_ens, 'iptm') else np.empty(0)
     plddt = np.asarray(base_ens.plddt_mean, dtype=float) if hasattr(base_ens, 'plddt_mean') else np.empty(0)
-    pae = np.asarray(base_ens.mean_pae, dtype=float) if hasattr(base_ens, 'mean_pae') else np.empty(0)
     
     return {
         "n_samples": int(base_ens.n_samples),
         "ptm": ptm[np.isfinite(ptm)].tolist(),
         "iptm": iptm[np.isfinite(iptm)].tolist(),
         "plddt": plddt[np.isfinite(plddt)].tolist(),
-        "pae": float(base_ens.mean_pae) if hasattr(base_ens, 'mean_pae') else float("nan"),
     }
 
 
@@ -1335,7 +1325,7 @@ def _baseline_cluster_analysis(baseline_name: str, ensembles: Dict[str, Ensemble
         from scipy.spatial.distance import squareform
         from scipy.cluster.hierarchy import linkage
         
-        pw = _pairwise_rmsd(aligned, fit_mask)
+        pw = geom.pairwise_rmsd(aligned, fit_mask)
         condensed = squareform(pw, checks=False)
         if condensed.size and np.any(condensed > 0):
             Z = linkage(condensed, method="average")
@@ -1374,7 +1364,7 @@ def _baseline_pairwise_rmsd_distribution(baseline_name: str, ensembles: Dict[str
         fit_mask = np.ones(N, dtype=bool)
     
     aligned = geom.superpose_stack_to_mean(coords, plddts, plddt_cutoff)
-    pw_rmsd = _pairwise_rmsd(aligned, fit_mask)
+    pw_rmsd = geom.pairwise_rmsd(aligned, fit_mask)
     
     triu_idx = np.triu_indices(S, k=1)
     pairwise_vals = pw_rmsd[triu_idx]
@@ -1463,7 +1453,7 @@ def _variance_summary_table(hetero, ensembles) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("condition").reset_index(drop=True)
 
 
-def _fold_divergence(df_dist, baseline_name, compute_tm):
+def _fold_divergence(df_dist, baseline_name, compute_tm, conditions=None):
     """
     Fold-consistency verdict from TM-score vs baseline (plan 2.5).
 
@@ -1489,7 +1479,7 @@ def _fold_divergence(df_dist, baseline_name, compute_tm):
             verdict = "divergent"        # different fold (TM < 0.5)
         
         # Issue 7 fix: Add perturbation context
-        has_dna = r.get("n_nucleic_residues", 0) > 0
+        has_dna = conditions[r["condition"]].n_nucleic_residues > 0 if conditions and r["condition"] in conditions else False
         context = "dna_cofold" if has_dna else "protein_only"
         
         rows.append({
@@ -1671,7 +1661,6 @@ def _scientific_summary_rows(others, conditions, df_dist, df_conf, hetero,
         rmsd = d.get("rmsd", float("nan"))
         rmsd_lo = d.get("rmsd_lo", float("nan"))
         tm_score = d.get("tm_score", float("nan"))
-        n_sig = d.get("n_significant", 0)
         # n_significant is now confidence-gated (FDR-significant AND pLDDT>=70 in
         # both states), the grounded successor to the old RMSF<3 "core" count.
         n_sig_core = d.get("n_significant", 0)

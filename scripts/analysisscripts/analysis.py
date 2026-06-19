@@ -17,6 +17,14 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+# Try to import scipy (optional for clustering)
+try:
+    from scipy.spatial.distance import squareform
+    from scipy.cluster.hierarchy import linkage, fcluster
+    HAS_SCIPY = True
+except ImportError:  # pragma: no cover
+    HAS_SCIPY = False
+
 from . import geometry as geom
 from . import stats as st
 from . import cluster as clust
@@ -195,6 +203,16 @@ def run(
         if h.n_clusters > 1:
             log.info("  %s: %d clusters, dominant %.0f%%, tier=%s",
                      name, h.n_clusters, 100 * h.dominant_fraction, h.tier)
+
+    # ------------------------------------------------------------------
+    # Baseline ensemble characterization (for Cycle 11)
+    # ------------------------------------------------------------------
+    baseline_cluster_info = _baseline_cluster_analysis(
+        baseline_name, ensembles, plddt_cutoff, cluster_threshold)
+    if baseline_cluster_info:
+        log.info("Baseline ensemble: %d clusters, dominant %.0f%%",
+                 baseline_cluster_info["n_clusters"],
+                 baseline_cluster_info["dominant_fraction"] * 100)
 
     # ------------------------------------------------------------------
     # Per-condition structural analysis
@@ -667,7 +685,7 @@ def run(
                     baseline, rmsf_lookup, plddt_cutoff, label_map, plots_dir)
         
         # Cycle 12: New visualizations - quality dashboard and clustering overview
-        written_plots += plot_qlt.plot_quality_dashboard(df_conf, df_dist, plots_dir)
+        written_plots += plot_sum.plot_quality_dashboard(df_conf, df_dist, plots_dir)
         written_plots += plot_qlt.plot_confidence_distributions(df_conf, plots_dir)
         written_plots += plot_qlt.plot_quality_correlations(df_conf, plots_dir)
         
@@ -779,6 +797,17 @@ def run(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _pairwise_rmsd(coords: np.ndarray, fit_mask: np.ndarray) -> np.ndarray:
+    """Symmetric S×S Cα RMSD matrix between ensemble replicates."""
+    S = coords.shape[0]
+    mat = np.zeros((S, S), dtype=np.float64)
+    for i in range(S):
+        for j in range(i + 1, S):
+            _, _, rmsd = geom.kabsch(coords[i][fit_mask], coords[j][fit_mask])
+            mat[i, j] = mat[j, i] = rmsd
+    return mat
+
 
 def _r(v, n=4):
     return round(float(v), n) if (v is not None and math.isfinite(v)) else float("nan")
@@ -1576,6 +1605,15 @@ def _seed_bias_assessment(ensembles) -> dict:
                  "replicate-level bootstrap CIs also treat the within-seed samples as "
                  "if independent, so they may be mildly anti-conservative."),
     }
+
+
+def _tier_key(t: str) -> float:
+    if t == "0x":
+        return 0.0
+    try:
+        return float(t.rstrip("x"))
+    except ValueError:
+        return 9_999.0
 
 
 def select_context_references(conditions, baseline_name, struct):

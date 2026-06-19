@@ -1,0 +1,120 @@
+WINDOWS PYTHON & CONDA CHEATSHEET
+=================================
+
+Problem: "pip is not recognized"
+--------------------------------
+Cause: pip.exe is inside your conda environment folder, not on your system PATH.
+
+Solution 1 (use python to call pip):
+  C:\Users\Chris\.conda\envs\af3_thesis\python.exe -m pip install PACKAGE_NAME
+
+Solution 2 (use full pip path):
+  C:\Users\Chris\.conda\envs\af3_thesis\Scripts\pip.exe install PACKAGE_NAME
+
+Solution 3 (activate conda environment first):
+  C:\Users\Chris\.conda\Scripts\conda.exe activate af3_thesis
+  pip install PACKAGE_NAME
+  (Note: conda.exe itself might also not be on PATH - use Solution 1 or 2 instead)
+
+
+Problem: Running tests fails with "ModuleNotFoundError: No module named 'pytest'"
+----------------------------------------------------------------------------------
+Cause: You're running python from a different environment (or system python) that
+       doesn't have pytest installed.
+
+Solution:
+  C:\Users\Chris\.conda\envs\af3_thesis\python.exe -m pytest tests/test_integration.py -v
+
+
+Problem: "Command not found" for pip, conda, python
+---------------------------------------------------
+Cause: Windows doesn't know where these tools are because their folders aren't
+       in your system PATH.
+
+Common locations (add these to PATH to fix permanently):
+  - Python:      C:\Users\Chris\.conda\envs\af3_thesis\
+  - pip:         C:\Users\Chris\.conda\envs\af3_thesis\Scripts\
+  - conda:       C:\Users\Chris\.conda\Scripts\
+
+
+Problem: Wrong Python version / wrong environment being used
+------------------------------------------------------------
+Check which python is being used:
+  Get-Command python | Select-Object -ExpandProperty Definition
+
+List conda environments:
+  C:\Users\Chris\.conda\Scripts\conda.exe env list
+
+Activate specific environment:
+  C:\Users\Chris\.conda\Scripts\conda.exe activate af3_thesis
+
+
+Common Task Commands
+====================
+
+1. Install a package:
+   C:\Users\Chris\.conda\envs\af3_thesis\python.exe -m pip install PACKAGE_NAME
+
+2. Install from requirements.txt (in project folder):
+   cd "C:\Users\Chris\Desktop\thesis\af3-toolkit\af3inputbuilder\scripts"
+   C:\Users\Chris\.conda\envs\af3_thesis\python.exe -m pip install -r requirements.txt
+
+3. Run pytest:
+   cd "C:\Users\Chris\Desktop\thesis\af3-toolkit\af3inputbuilder\scripts"
+   C:\Users\Chris\.conda\envs\af3_thesis\python.exe -m pytest tests/ -v
+
+4. Run a specific test file:
+   C:\Users\Chris\.conda\envs\af3_thesis\python.exe -m pytest tests/test_integration.py -v
+
+5. Check installed packages:
+   C:\Users\Chris\.conda\envs\af3_thesis\python.exe -m pip list
+
+6. Check package version:
+   C:\Users\Chris\.conda\envs\af3_thesis\python.exe -m pip show PACKAGE_NAME
+
+7. Update a package:
+   C:\Users\Chris\.conda\envs\af3_thesis\python.exe -m pip install --upgrade PACKAGE_NAME
+
+8. List all Python interpreters on system:
+   Get-Command python* | Select-Object Name,Definition
+
+
+Quick Reference: Your Current Setup
+===================================
+
+Conda environment: af3_thesis
+Python location:   C:\Users\Chris\.conda\envs\af3_thesis\python.exe
+Pip location:      C:\Users\Chris\.conda\envs\af3_thesis\Scripts\pip.exe
+
+Project folder:    C:\Users\Chris\Desktop\thesis\af3-toolkit\af3inputbuilder\scripts
+
+
+Path Addition (Permanent Fix)
+=============================
+To add conda to your PATH permanently:
+
+1. Press Win+X → System
+2. Click "Advanced system settings"
+3. Click "Environment Variables"
+4. Under "User variables", find "Path" and click "Edit"
+5. Click "New" and add:
+   C:\Users\Chris\.conda\Scripts
+   C:\Users\Chris\.conda\envs\af3_thesis\
+   C:\Users\Chris\.conda\envs\af3_thesis\Scripts
+6. Click "OK" on all dialogs
+7. Open a NEW terminal window for changes to take effect
+
+Then you can simply use:
+  conda activate af3_thesis
+  pip install PACKAGE_NAME
+  pytest tests/ -v
+
+
+Troubleshooting Checklist
+=========================
+[ ] Am I in the correct project directory?
+[ ] Am I using the conda environment's python?
+[ ] Is the package installed in the conda environment (not system python)?
+[ ] Are there multiple Python installations on my system?
+[ ] Did I restart my terminal after PATH changes?
+[ ] Is the package name spelled correctly?

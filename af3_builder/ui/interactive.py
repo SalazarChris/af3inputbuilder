@@ -242,14 +242,14 @@ def add_protein_wizard(jb: JobBuilder):
             from ..utils.msa import validate_msa_sequence
             if not validate_msa_sequence(ump, seq):
                 _warn("unpairedMsa sequence does not match provided protein sequence.")
-            ump = os.path.basename(ump)
+            # Path preserved as supplied (Bug 1 fix)
         
         pmp = _ask_file("pairedMsa Path")
         if pmp:
             from ..utils.msa import validate_msa_sequence
             if not validate_msa_sequence(pmp, seq):
                 _warn("pairedMsa sequence does not match provided protein sequence.")
-            pmp = os.path.basename(pmp)
+            # Path preserved as supplied (Bug 1 fix)
 
     # 2. Templates
     t_choice = _choose("Template Strategy", [
@@ -304,7 +304,7 @@ def add_rna_wizard(jb: JobBuilder):
         unpaired_msa = ""
     elif msa_choice == "provide":
         ump = _ask_file("unpairedMsa Path")
-        if ump: ump = os.path.basename(ump)
+        # Path preserved as supplied (Bug 1 fix)
 
     mods = []
     if _ask_yn("Add modifications?"): mods = manage_modifications_wizard("rna", seq, [])
@@ -340,7 +340,7 @@ def add_dna_wizard(jb: JobBuilder):
         unpaired_msa = ""
     elif msa_choice == "provide":
         ump = _ask_file("unpairedMsa Path")
-        if ump: ump = os.path.basename(ump)
+        # Path preserved as supplied (Bug 1 fix)
 
     mods = []
     if _ask_yn("Add modifications?"): mods = manage_modifications_wizard("dna", seq, [])
@@ -598,7 +598,7 @@ def edit_protein_wizard(jb: JobBuilder, idx: int):
             else:
                 p = _ask_file("Unpaired MSA Path")
                 if p:
-                    data["unpairedMsaPath"] = os.path.basename(p)
+                    data["unpairedMsaPath"] = p
                     data.pop("unpairedMsa", None)
             jb._require_version(2)
         elif field == "pmsa":
@@ -614,7 +614,7 @@ def edit_protein_wizard(jb: JobBuilder, idx: int):
             else:
                 p = _ask_file("Paired MSA Path")
                 if p:
-                    data["pairedMsaPath"] = os.path.basename(p)
+                    data["pairedMsaPath"] = p
                     data.pop("pairedMsa", None)
             jb._require_version(2)
         elif field == "ptm":
@@ -675,7 +675,7 @@ def edit_rna_wizard(jb: JobBuilder, idx: int):
             else:
                 p = _ask_file("Unpaired MSA Path")
                 if p:
-                    data["unpairedMsaPath"] = os.path.basename(p)
+                    data["unpairedMsaPath"] = p
                     data.pop("unpairedMsa", None)
             jb._require_version(2)
         elif field == "mod":
@@ -722,7 +722,7 @@ def edit_dna_wizard(jb: JobBuilder, idx: int):
             else:
                 p = _ask_file("Unpaired MSA Path")
                 if p:
-                    data["unpairedMsaPath"] = os.path.basename(p)
+                    data["unpairedMsaPath"] = p
                     data.pop("unpairedMsa", None)
             jb._require_version(2)
         elif field == "mod":

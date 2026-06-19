@@ -295,7 +295,7 @@ def plot_structural_distance_heatmap(
                 traverse(left)
                 traverse(right)
         
-        traverse(n_leaves - 1 + n_leaves)
+        traverse(2 * n_leaves - 2)  # Root node for n_leaves
         return order
     
     leaf_order = get_leaf_order(Z)
@@ -324,7 +324,7 @@ def plot_structural_distance_heatmap(
     ax_left = axes[1, 0]
     # Transpose for left-side dendrogram
     Z_left = linkage(squareform(reordered, checks=False), method="average")
-    dendrogram(Z_left, ax=ax_left, orientation="horizontal", color_threshold=0,
+    dendrogram(Z_left, ax=ax_left, orientation="left", color_threshold=0,
               link_color_func=lambda _: "#555555")
     ax_left.axvline(cut_height, color=style.C_DISP, linestyle="--", linewidth=1.0)
     ax_left.set_yticks([])

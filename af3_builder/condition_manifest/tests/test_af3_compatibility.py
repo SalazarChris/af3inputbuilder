@@ -553,9 +553,9 @@ class TestBuildAllJobsRejectsUnsupported:
             "covalent_bond_registry": load_covalent_bond_registry(POU_DIR / "covalent_bond_registry.csv"),
         }
         jobs = build_all_jobs(manifest, seeds=[1], **regs)
-        # 8 original + 14 Priority 1 + 4 methylation + 4 SUMO/Ub (with bonds) = 30
-        # O-GlcNAc is uncertain and excluded by default
-        assert len(jobs) == 30
+        # 8 original + 14 Priority 1 + 4 methylation + 2 SUMO = 28 verified_native
+        # O-GlcNAc (2 conditions) is uncertain and excluded by default
+        assert len(jobs) == 28
 
     def test_build_all_jobs_with_uncertain_for_pou(self):
         """build_all_jobs with allow_uncertain=True builds all non-unsupported conditions."""
@@ -576,5 +576,5 @@ class TestBuildAllJobsRejectsUnsupported:
             "covalent_bond_registry": load_covalent_bond_registry(POU_DIR / "covalent_bond_registry.csv"),
         }
         jobs = build_all_jobs(manifest, seeds=[1], allow_uncertain=True, **regs)
-        # All 32 conditions (8 original + 14 Priority 1 + 10 Priority 2) should build
-        assert len(jobs) == 32
+        # All 30 conditions (8 original + 14 Priority 1 + 8 Priority 2) should build
+        assert len(jobs) == 30

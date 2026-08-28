@@ -227,9 +227,9 @@ class TestBuildJob:
     def test_build_all_jobs(self, pou_manifest):
         regs = _load_pou_registries()
         jobs = build_all_jobs(pou_manifest, seeds=[1], **regs)
-        # 8 original + 14 Priority 1 + 4 methylation + 4 SUMO/Ub (with bonds) = 30
-        # O-GlcNAc is uncertain and excluded by default
-        assert len(jobs) == 30
+        # 8 original + 14 Priority 1 + 4 methylation + 2 SUMO = 28 verified_native
+        # O-GlcNAc (2 conditions) is uncertain and excluded by default
+        assert len(jobs) == 28
         for cid, jb in jobs.items():
             job_dict = jb.to_dict()
             assert "name" in job_dict
@@ -240,8 +240,8 @@ class TestBuildJob:
         """build_all_jobs with allow_uncertain=True builds all conditions."""
         regs = _load_pou_registries()
         jobs = build_all_jobs(pou_manifest, seeds=[1], allow_uncertain=True, **regs)
-        # All 32 conditions
-        assert len(jobs) == 32
+        # All 30 conditions (8 original + 14 Priority 1 + 8 Priority 2)
+        assert len(jobs) == 30
 
 
 # ---------------------------------------------------------------------------

@@ -148,8 +148,8 @@ class TestPOUConditions:
         )
 
     def test_conditions_loaded(self, manifest):
-        # 8 original + 14 Priority 1 + 10 Priority 2 = 32
-        assert len(manifest.conditions) == 32
+        # 8 original + 14 Priority 1 + 8 Priority 2 = 30
+        assert len(manifest.conditions) == 30
 
     def test_all_condition_ids_present(self, manifest):
         # Original 8 test conditions
@@ -168,14 +168,14 @@ class TestPOUConditions:
             "oct4_s236p", "oct4_s236p_dna",
             "oct4_t235p_s236p", "oct4_t235p_s236p_dna",
         }
-        # 10 Priority 2 conditions
+        # 8 Priority 2 conditions (K133-Ub removed: mouse numbering, see modification_registry notes)
         priority2 = {
             "oct4_monoMe_K222", "oct4_diMe_K222",
             "oct4_OGlcNAc_S236",
-            "oct4_SUMO_K123", "oct4_UB_K133",
+            "oct4_SUMO_K123",
             "oct4_monoMe_K222_dna", "oct4_diMe_K222_dna",
             "oct4_OGlcNAc_S236_dna",
-            "oct4_SUMO_K123_dna", "oct4_UB_K133_dna",
+            "oct4_SUMO_K123_dna",
         }
         assert set(manifest.condition_ids) == original | priority1 | priority2
 
@@ -365,9 +365,9 @@ class TestProteinXDataset:
             factors_path=PROTEIN_X_DIR / "condition_factors.csv",
         )
         # Both loaded successfully
-        assert len(pou_manifest.conditions) == 32
+        assert len(pou_manifest.conditions) == 30
         assert len(px_manifest.conditions) == 8
-        # POU has 11 factor types (DNA + 6 phosphorylation + methylation + SUMO + Ub + O-GlcNAc factors)
+        # POU has 11 factor types (DNA + 6 phosphorylation + 2 methylation + SUMO + O-GlcNAc)
         # The exact count depends on the condition_factors.csv
         pou_attrs = pou_manifest.get_attribute_names()
         assert len(pou_attrs) >= 7  # at least the original 7 factor types
@@ -387,10 +387,10 @@ class TestIncompleteDesign:
             factors_path=POU_DIR / "condition_factors.csv",
         )
         insp = inspect_manifest(manifest)
-        # 32 conditions total (8 original + 14 Priority 1 + 10 Priority 2)
-        assert insp.n_conditions == 32
-        # 12 factor types (DNA + 6 phosphorylation + 2 methylation + SUMO + Ub + O-GlcNAc)
-        assert insp.n_factors == 12
+        # 30 conditions total (8 original + 14 Priority 1 + 8 Priority 2)
+        assert insp.n_conditions == 30
+        # 11 factor types (DNA + 6 phosphorylation + 2 methylation + SUMO + O-GlcNAc)
+        assert insp.n_factors == 11
 
     def test_protein_x_is_incomplete(self):
         manifest = load_master_manifest(
@@ -530,7 +530,7 @@ class TestNoHardcodedAssumptions:
         all_factors = set()
         for cond_factors in matrix.values():
             all_factors.update(cond_factors.keys())
-        assert len(all_factors) == 12  # DNA + 6 phospho + 2 methylation + SUMO + Ub + O-GlcNAc
+        assert len(all_factors) == 11  # DNA + 6 phospho + 2 methylation + SUMO + O-GlcNAc
 
 
 # ---------------------------------------------------------------------------
@@ -632,11 +632,11 @@ class TestInspection:
             factors_path=POU_DIR / "condition_factors.csv",
         )
         insp = inspect_manifest(manifest)
-        assert insp.n_conditions == 32
-        assert insp.n_factors == 12
+        assert insp.n_conditions == 30
+        assert insp.n_factors == 11
         summary = insp.summary()
-        assert "32" in summary  # 32 conditions
-        assert "12" in summary  # 12 factors
+        assert "30" in summary  # 30 conditions
+        assert "11" in summary  # 11 factors
 
     def test_protein_x_inspection(self):
         manifest = load_master_manifest(

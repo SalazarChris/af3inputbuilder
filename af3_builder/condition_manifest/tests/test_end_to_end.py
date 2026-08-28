@@ -1027,9 +1027,9 @@ class TestJSONFixtures:
     def test_build_all_jobs_all_valid(self, pou_manifest, pou_registries):
         """All verified-native POU conditions build valid JSON."""
         jobs = build_all_jobs(pou_manifest, seeds=[42], **pou_registries)
-        # 8 original + 14 Priority 1 + 4 methylation + 4 SUMO/Ub (with bonds) = 30
-        # O-GlcNAc is uncertain and excluded by default
-        assert len(jobs) == 30
+        # 8 original + 14 Priority 1 + 4 methylation + 2 SUMO = 28 verified_native
+        # O-GlcNAc (2 conditions) is uncertain and excluded by default
+        assert len(jobs) == 28
         for cid, jb in jobs.items():
             d = jb.to_dict()
             assert d["dialect"] == "alphafold3"
@@ -1040,8 +1040,8 @@ class TestJSONFixtures:
     def test_build_all_jobs_with_uncertain(self, pou_manifest, pou_registries):
         """build_all_jobs with allow_uncertain=True builds all conditions."""
         jobs = build_all_jobs(pou_manifest, seeds=[42], allow_uncertain=True, **pou_registries)
-        # All 32 conditions
-        assert len(jobs) == 32
+        # All 30 conditions (8 original + 14 Priority 1 + 8 Priority 2)
+        assert len(jobs) == 30
         for cid, jb in jobs.items():
             d = jb.to_dict()
             assert d["dialect"] == "alphafold3"
@@ -1533,20 +1533,6 @@ class TestPriority2Representations:
         assert bond[0][1] == 123  # Lys 123
         assert bond[0][2] == "NZ"  # epsilon nitrogen
 
-    def test_ubiquitin_builds_separate_entity_with_bond(self, pou_manifest, pou_registries):
-        """K133-Ub builds with 2 protein entities and a covalent bond."""
-        jb = build_job(pou_manifest, "oct4_UB_K133", seeds=[1],
-                       allow_uncertain=True, **pou_registries)
-        d = jb.to_dict()
-        assert d["dialect"] == "alphafold3"
-        prot_seqs = [s for s in d["sequences"] if "protein" in s]
-        assert len(prot_seqs) == 2
-        assert "bondedAtomPairs" in d
-        assert len(d["bondedAtomPairs"]) == 1
-        bond = d["bondedAtomPairs"][0]
-        assert bond[0][1] == 133  # Lys 133
-        assert bond[0][2] == "NZ"
-
     def test_sumo_dna_includes_dna(self, pou_manifest, pou_registries):
         """K123-SUMO + DNA includes all three entity types."""
         jb = build_job(pou_manifest, "oct4_SUMO_K123_dna", seeds=[1],
@@ -1558,13 +1544,12 @@ class TestPriority2Representations:
         assert "bondedAtomPairs" in d
 
     def test_all_priority2_build_with_allow_uncertain(self, pou_manifest, pou_registries):
-        """All 10 Priority 2 conditions build with allow_uncertain=True."""
+        """All 8 Priority 2 conditions build with allow_uncertain=True."""
         p2_ids = [
             "oct4_monoMe_K222", "oct4_diMe_K222",
             "oct4_monoMe_K222_dna", "oct4_diMe_K222_dna",
             "oct4_OGlcNAc_S236", "oct4_OGlcNAc_S236_dna",
             "oct4_SUMO_K123", "oct4_SUMO_K123_dna",
-            "oct4_UB_K133", "oct4_UB_K133_dna",
         ]
         for cid in p2_ids:
             jb = build_job(pou_manifest, cid, seeds=[1],
@@ -1578,7 +1563,7 @@ class TestPriority2Representations:
         """All Priority 2 conditions use the same 10 seeds."""
         p2_ids = [
             "oct4_monoMe_K222", "oct4_SUMO_K123",
-            "oct4_UB_K133", "oct4_OGlcNAc_S236",
+            "oct4_OGlcNAc_S236", "oct4_diMe_K222",
         ]
         expected_seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         for cid in p2_ids:

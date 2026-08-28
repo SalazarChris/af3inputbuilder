@@ -16,7 +16,7 @@ class JobBuilder:
         self.userCCD: Optional[str] = None
         self.userCCDPath: Optional[str] = None
         self.dialect: str = "alphafold3"
-        self.version: int = 1
+        self.version: int = 3
         self._id_manager = IDManager()
 
     # basic setters

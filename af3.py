@@ -100,16 +100,91 @@ def run_complete_analysis_pipeline():
     print(f"  {CYAN}Step 4:{RESET} JSON Output Options")
     save_raw_json = _ask_yn("Create raw JSON files for individual predictions?", default=False)
     save_summary_json = _ask_yn("Create extraction_summary.json and validation_report.json?", default=False)
-    
+
+    # ------------------------------------------------------------------
+    # Step 5: Structural Analysis (optional)
+    # ------------------------------------------------------------------
+    print()
+    print(f"  {CYAN}Step 5:{RESET} Structural Analysis")
+    print(f"  {DIM}Analyze 3D geometry of AF3 predicted structures.{RESET}")
+    print(f"  {DIM}Requires .cif structure files in your AF3 output.{RESET}")
+    coordinate_analysis_enabled = _ask_yn("Enable structural/geometric analysis?", default=False)
+
+    reference_condition = None
+    if coordinate_analysis_enabled:
+        # Auto-discover conditions from the input directory
+        print()
+        print(f"  {DIM}Discovering conditions from input directory...{RESET}")
+        discovered_conditions = []
+        try:
+            input_path = os.path.join(input_dir)
+            if os.path.isdir(input_path):
+                for entry in sorted(os.listdir(input_path)):
+                    entry_path = os.path.join(input_path, entry)
+                    if os.path.isdir(entry_path) and not entry.startswith('.'):
+                        # Check if this directory contains seed-*/sample-* subdirs with CIF files
+                        has_cif = False
+                        for sub in os.listdir(entry_path):
+                            sub_path = os.path.join(entry_path, sub)
+                            if os.path.isdir(sub_path) and sub.startswith('seed-'):
+                                for f in os.listdir(sub_path):
+                                    if f.endswith('_model.cif'):
+                                        has_cif = True
+                                        break
+                            if has_cif:
+                                break
+                        if has_cif:
+                            discovered_conditions.append(entry)
+        except Exception:
+            pass
+
+        if discovered_conditions:
+            print(f"  {GREEN}Found {len(discovered_conditions)} conditions:{RESET}")
+            for i, cond in enumerate(discovered_conditions, 1):
+                print(f"    {i}) {cond}")
+            print()
+            print(f"  {DIM}Select the reference condition for structural comparisons.{RESET}")
+            print(f"  {DIM}All other conditions will be compared against this one.{RESET}")
+            print(f"  {DIM}Type a number, condition name, or press Enter to skip.{RESET}")
+
+            ref_input = _ask_input("Reference condition", "")
+            if ref_input:
+                # Try as number first
+                try:
+                    idx = int(ref_input) - 1
+                    if 0 <= idx < len(discovered_conditions):
+                        reference_condition = discovered_conditions[idx]
+                except ValueError:
+                    # Try as condition name
+                    if ref_input in discovered_conditions:
+                        reference_condition = ref_input
+                    else:
+                        print(f"  {YELLOW}Warning: '{ref_input}' not found in discovered conditions. Using first condition.{RESET}")
+                        reference_condition = discovered_conditions[0]
+            else:
+                print(f"  {DIM}No reference specified. First condition will be used as reference.{RESET}")
+
+            if reference_condition:
+                print(f"  {GREEN}Reference: {reference_condition}{RESET}")
+        else:
+            print(f"  {YELLOW}No conditions with CIF files found. Structural analysis may not produce results.{RESET}")
+
     print()
     if not _ask_yn("Run complete pipeline now?", default=True):
         print(f"  {YELLOW}Cancelled.{RESET}")
         input("\n  Press Enter to return...")
         return
-        
+
     print()
     _ok("Starting analysis pipeline...\n")
-    
+    if coordinate_analysis_enabled:
+        _ok("Structural analysis: ENABLED")
+        if reference_condition:
+            print(f"  {DIM}Reference condition: {reference_condition}{RESET}")
+        else:
+            print(f"  {DIM}Reference condition: first condition (auto-selected){RESET}")
+    print()
+
     # Try importing af3_analysis
     # The af3_analysis package is a sibling repository.  We locate it by
     # walking up from af3inputbuilder/ to the shared parent directory that
@@ -130,6 +205,8 @@ def run_complete_analysis_pipeline():
             raw_af3_root=input_dir,
             output_dir=output_dir,
             run_id=run_id if run_id else None,
+            coordinate_analysis_enabled=coordinate_analysis_enabled,
+            reference_condition=reference_condition,
         )
 
         result = run_pipeline(

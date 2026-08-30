@@ -110,6 +110,15 @@ def run_complete_analysis_pipeline():
     print(f"  {DIM}Requires .cif structure files in your AF3 output.{RESET}")
     coordinate_analysis_enabled = _ask_yn("Enable structural/geometric analysis?", default=False)
 
+    # Check structural-analysis dependencies up front when enabled.
+    if coordinate_analysis_enabled:
+        missing_struct = _check_specific_deps(_STRUCTURAL_PACKAGES)
+        if missing_struct:
+            coordinate_analysis_enabled = False
+            print(f"  {YELLOW}Structural analysis disabled due to missing packages.{RESET}")
+            print(f"  {DIM}Install with: pip install {' '.join(p for _, p in missing_struct)}{RESET}")
+            print()
+
     reference_condition = None
     if coordinate_analysis_enabled:
         # Auto-discover conditions from the input directory
@@ -282,6 +291,11 @@ _REQUIRED_PACKAGES = [
     ("sklearn",    "scikit-learn"),
 ]
 
+# Structural-analysis requires gemmi for mmCIF parsing.
+_STRUCTURAL_PACKAGES = [
+    ("gemmi",      "gemmi"),
+]
+
 
 def _check_and_install_deps():
     """Check required packages on startup; offer to auto-install via pip if missing."""
@@ -331,6 +345,52 @@ def _check_and_install_deps():
 
 
 _check_and_install_deps()
+
+
+def _check_specific_deps(packages):
+    """Check a list of (import_name, pip_name) pairs. Returns list of missing.
+    Offers auto-install when missing packages are found.
+    """
+    import importlib as _il
+    missing = []
+    for import_name, pip_name in packages:
+        try:
+            _il.import_module(import_name)
+        except ImportError:
+            missing.append((import_name, pip_name))
+
+    if missing:
+        print("\n" + "=" * 60)
+        print("  Missing Dependencies")
+        print("=" * 60)
+        for name, pkg in missing:
+            print(f"  \033[91m✖\033[0m  {name}  ({pkg})")
+        print(f"\n  {len(missing)} package(s) need to be installed.\n")
+
+        try:
+            answer = input("  Install via pip now? (Y/n): ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            answer = "n"
+
+        if answer in ("", "y", "yes"):
+            pip_pkgs = [pkg for _, pkg in missing]
+            cmd = [sys.executable, "-m", "pip", "install", "--quiet"] + pip_pkgs
+            print(f"\n  Installing: {', '.join(pip_pkgs)}...")
+            result = subprocess.run(cmd)
+            if result.returncode == 0:
+                print("  \033[92m✔  Installed.\033[0m\n")
+                return []  # all installed successfully
+            else:
+                print("  \033[91m✖  pip install failed.\033[0m")
+                print(f"  Try manually:  pip install {' '.join(pip_pkgs)}\n")
+                return missing
+        else:
+            print(f"\n  Skipped. Those features will be disabled.\n")
+            return missing
+
+    return []
+
 
 # ---------------------------------------------------------------------------
 # UI helpers (inline fallback -- no external deps needed for the menu)
